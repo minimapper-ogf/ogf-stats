@@ -91,7 +91,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
 
     <div id="leaderboardPage" class="page">
         <h1>Leaderboards</h1>
-        <p class="meta">Click headers to sort. Daily is a rolling 24-hour window.</p>
+        <p class="meta">leaderboards by hour, day, and month. Headers sort values :)</p>
         <div class="leaderboard-grid">
           <div class="leaderboard-card">
             <h2>Hourly</h2>
@@ -198,7 +198,7 @@ function updateCharts(entries) {{
     title: {{ text: 'Activity Volume' }},
     xAxis: {{ type: 'datetime' }},
     yAxis: {{ title: {{ text: 'New Changesets' }} }},
-    series: [{{ name: 'Count', data: diffSeries, color: '#7cb5ec' }}],
+    series: [{{ name: 'Count', data: diffSeries, color: '#007bff' }}],
     credits: {{ enabled: false }}
   }});
 }}
