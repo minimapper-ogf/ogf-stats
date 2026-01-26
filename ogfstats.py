@@ -16,8 +16,8 @@ TARGET_DIR = Path("/var/www/ogfstats")
 VERSION_HISTORY = [
     {"v": "3.3", "date": "2026-01-26", "note": "Refined monthly reset logic to preserve chart history."},
     {"v": "3.2", "date": "2026-01-26", "note": "Optimized for static hosting in /var/www/."},
-    {"v": "3.1", "date": "2026-01-26", "note": "updated file structure, version history tab added."},
-    {"v": "3.0", "date": "2026-01-26", "note": "Added Monthly Leaderboards, split webpage into two tabs."},
+    {"v": "3.1", "date": "2026-01-26", "note": "Updated file structure, version history tab added."},
+    {"v": "3.0", "date": "2026-01-26", "note": "Added Monthly Leaderboards, split webpage into tabs."},
     {"v": "2.0", "date": "2025-08-22", "note": "First documented version."}
 ]
 
@@ -38,26 +38,37 @@ INDEX_HTML = f"""<!DOCTYPE html>
   <style>
     body {{ font-family: sans-serif; background: #fafafa; margin:0; padding:0; }}
     .nav {{ background: #333; color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }}
-    .nav a {{ color: #ccc; text-decoration: none; font-weight: bold; cursor: pointer; padding: 5px 15px; border-radius: 4px; }}
+    .nav a {{ color: #ccc; text-decoration: none; font-weight: bold; cursor: pointer; padding: 5px 15px; border-radius: 4px; transition: 0.2s; }}
     .nav a:hover {{ color: white; background: #444; }}
     .nav a.active {{ color: white; background: #007bff; }}
     .wrap {{ max-width: 1300px; margin: 24px auto; padding: 16px; background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }}
     .page {{ display: none; }}
     .page.active {{ display: block; }}
-    h1 {{ font-size: 22px; margin: 0; }}
+    h1 {{ font-size: 22px; margin: 0 0 8px; }}
     .meta {{ color: #666; font-size: 14px; margin-bottom: 16px; }}
     .charts {{ display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }}
     #chart, #chartDiff {{ flex: 1; min-width: 400px; height: 500px; }}
     .btns {{ margin-bottom: 12px; }}
     button {{ padding: 6px 12px; border:1px solid #ddd; border-radius: 6px; background:#f5f5f5; cursor:pointer; }}
     button.active {{ background:#007bff; color:white; }}
+    
+    /* Table Styling with Rounded Corners */
     .leaderboard-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }}
-    .leaderboard-card {{ background: #fff; border-radius: 12px; border: 1px solid #eee; padding: 16px; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-    th {{ background: #007bff; color: white; padding: 8px; text-align: left; cursor: pointer; }}
-    td {{ padding: 8px; border-bottom: 1px solid #eee; font-size: 13px; }}
-    tr:hover {{ background: #f9f9f9; }}
-    .footer {{ text-align: center; color: #999; font-size: 12px; margin-top: 40px; padding-bottom: 20px; }}
+    .leaderboard-card {{ background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }}
+    .leaderboard-card h2 {{ font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid #007bff; display: inline-block; padding-bottom: 4px; }}
+    .table-container {{ border-radius: 12px; overflow: hidden; border: 1px solid #007bff33; margin-top: 10px; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th {{ background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; }}
+    th:hover {{ background: #0056b3; }}
+    th.asc::after {{ content: " ↑"; }}
+    th.desc::after {{ content: " ↓"; }}
+    td {{ padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }}
+    tr:last-child td {{ border-bottom: none; }}
+    tr:hover {{ background: #f5f9ff; }}
+    
+    .version-item {{ border-bottom: 1px solid #eee; padding: 12px 0; }}
+    .version-tag {{ background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }}
+    .footer {{ text-align: center; color: #999; font-size: 12px; margin: 40px 0; }}
   </style>
 </head>
 <body>
@@ -79,31 +90,62 @@ INDEX_HTML = f"""<!DOCTYPE html>
           <div id="chartDiff"></div>
         </div>
     </div>
+
     <div id="leaderboardPage" class="page">
         <h1>Leaderboards</h1>
-        <p class="meta">Sorted by Edit Count (descending)</p>
+        <p class="meta">Click headers to sort. Rolling 24h and Monthly data.</p>
         <div class="leaderboard-grid">
-          <div class="leaderboard-card"><h2>Hourly</h2><table id="hourlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
-          <div class="leaderboard-card"><h2>Daily (Rolling 24h)</h2><table id="dailyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
-          <div class="leaderboard-card"><h2>Monthly</h2><table id="monthlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
+          <div class="leaderboard-card">
+            <h2>Hourly</h2>
+            <div class="table-container">
+              <table id="hourlyTable">
+                <thead><tr><th onclick="sortTable('hourlyTable', 0)">User</th><th onclick="sortTable('hourlyTable', 1)">UID</th><th onclick="sortTable('hourlyTable', 2)">Edits</th><th onclick="sortTable('hourlyTable', 3)">Objs</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="leaderboard-card">
+            <h2>Daily (Rolling 24h)</h2>
+            <div class="table-container">
+              <table id="dailyTable">
+                <thead><tr><th onclick="sortTable('dailyTable', 0)">User</th><th onclick="sortTable('dailyTable', 1)">UID</th><th onclick="sortTable('dailyTable', 2)">Edits</th><th onclick="sortTable('dailyTable', 3)">Objs</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="leaderboard-card">
+            <h2>Monthly</h2>
+            <div class="table-container">
+              <table id="monthlyTable">
+                <thead><tr><th onclick="sortTable('monthlyTable', 0)">User</th><th onclick="sortTable('monthlyTable', 1)">UID</th><th onclick="sortTable('monthlyTable', 2)">Edits</th><th onclick="sortTable('monthlyTable', 3)">Objs</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
         </div>
     </div>
+
     <div id="versionPage" class="page">
         <h1>Version History</h1>
         <div id="versionList"></div>
     </div>
   </div>
-  <div class="footer">OGFStats &copy; 2026 | Data resets monthly</div>
+  <div class="footer">OGFStats &copy; 2026 | Automated Updates</div>
+
 <script>
 let mode = 'hourly';
 let rawData = null;
-const history = {json.dumps(VERSION_HISTORY)};
+const historyData = {json.dumps(VERSION_HISTORY)};
 
 function showPage(pageId) {{
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
     document.getElementById(pageId).classList.add('active');
-    document.getElementById('nav' + pageId.replace('Page','')).classList.add('active');
+    
+    let navId = 'navCharts';
+    if(pageId === 'leaderboardPage') navId = 'navLeaderboards';
+    if(pageId === 'versionPage') navId = 'navVersion';
+    document.getElementById(navId).classList.add('active');
     
     if (typeof gtag === 'function') {{
         gtag('event', 'page_view', {{ page_title: pageId, page_path: '/' + pageId }});
@@ -120,9 +162,11 @@ function setMode(m) {{
 }}
 
 function renderVersionHistory() {{
-    document.getElementById('versionList').innerHTML = history.map(v => `
-        <div style="border-bottom:1px solid #eee; padding:10px 0;">
-            <strong>v${{v.v}}</strong> (${{v.date}})<br><small>${{v.note}}</small>
+    const container = document.getElementById('versionList');
+    container.innerHTML = historyData.map(v => `
+        <div class="version-item">
+            <span class="version-tag">v${{v.v}}</span> <strong>${{v.date}}</strong>
+            <p style="margin: 8px 0 0; font-size: 14px; color: #444;">${{v.note}}</p>
         </div>
     `).join('');
 }}
@@ -131,28 +175,32 @@ async function load() {{
   try {{
     const resp = await fetch('data.json', {{ cache: 'no-store' }});
     rawData = await resp.json();
-    document.getElementById('updateTime').innerText = "Last Updated: " + rawData.last_month_update;
+    document.getElementById('updateTime').innerText = "Last Sync: " + rawData.last_month_update;
     updateCharts(rawData[mode]);
     updateLeaderboards(rawData);
-  }} catch(e) {{ console.error(e); }}
+  }} catch(e) {{ console.error("Load failed", e); }}
 }}
 
 function updateCharts(entries) {{
   if(!entries) return;
   const series = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
   const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
+  
   Highcharts.chart('chart', {{
+    chart: {{ zoomType: 'x' }},
     title: {{ text: 'Changeset ID Trend' }},
     xAxis: {{ type: 'datetime' }},
     yAxis: {{ title: {{ text: 'ID' }} }},
-    series: [{{ name: 'ID', data: series }}],
+    series: [{{ name: 'ID', data: series, color: '#007bff' }}],
     credits: {{ enabled: false }}
   }});
+  
   Highcharts.chart('chartDiff', {{
-    chart: {{ type: 'column' }},
-    title: {{ text: 'New Changesets' }},
+    chart: {{ type: 'column', zoomType: 'x' }},
+    title: {{ text: 'Activity Volume' }},
     xAxis: {{ type: 'datetime' }},
-    series: [{{ name: 'Change', data: diffSeries }}],
+    yAxis: {{ title: {{ text: 'New Changesets' }} }},
+    series: [{{ name: 'Count', data: diffSeries, color: '#28a745' }}],
     credits: {{ enabled: false }}
   }});
 }}
@@ -168,8 +216,30 @@ function fillTable(tableId, list) {{
     body.innerHTML = list.map(u => `<tr><td>${{u.user}}</td><td>${{u.uid}}</td><td>${{u.count}}</td><td>${{u.objects}}</td></tr>`).join('');
 }}
 
+function sortTable(tableId, colIndex) {{
+    const table = document.getElementById(tableId);
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const th = table.querySelectorAll('th')[colIndex];
+    const isAsc = !th.classList.contains('asc');
+    
+    rows.sort((a, b) => {{
+        let valA = a.children[colIndex].innerText;
+        let valB = b.children[colIndex].innerText;
+        if (!isNaN(valA) && !isNaN(valB)) {{
+            return isAsc ? valA - valB : valB - valA;
+        }}
+        return isAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    }});
+    
+    table.querySelectorAll('th').forEach(h => h.classList.remove('asc', 'desc'));
+    th.classList.add(isAsc ? 'asc' : 'desc');
+    tbody.innerHTML = '';
+    rows.forEach(row => tbody.appendChild(row));
+}}
+
 load();
-setInterval(load, 300000); // Refresh every 5 mins
+setInterval(load, 300000); 
 </script>
 </body>
 </html>
@@ -211,7 +281,6 @@ def update_data_file(out_json: Path, hour_start: datetime, cid: int, entries: li
         try: data = json.loads(out_json.read_text(encoding="utf-8"))
         except: pass
 
-    # Monthly Reset Logic
     current_month_str = hour_start.strftime("%Y-%m")
     last_update_ts = data.get("last_month_update", "")
     if last_update_ts and current_month_str != last_update_ts[:7]:
@@ -219,8 +288,6 @@ def update_data_file(out_json: Path, hour_start: datetime, cid: int, entries: li
         archive_dir.mkdir(parents=True, exist_ok=True)
         archive_path = archive_dir / f"{last_update_ts[:7]}.json"
         archive_path.write_text(json.dumps(data, indent=2))
-        
-        # CLEAR monthly data but KEEP chart history
         data["monthly_store"] = []
         data["monthly_leaderboard"] = []
         print(f"Archived month {last_update_ts[:7]}")
@@ -228,18 +295,16 @@ def update_data_file(out_json: Path, hour_start: datetime, cid: int, entries: li
     ts_str = hour_start.strftime("%Y-%m-%dT%H:%M:%SZ")
     data["last_month_update"] = ts_str
     
-    # 1. Charts (Persistent)
     h_list = data.setdefault("hourly", [])
     h_change = 0 if not h_list else cid - h_list[-1]["changeset_id"]
     h_list.append({"timestamp": ts_str, "changeset_id": cid, "change": h_change})
-    data["hourly"] = h_list[-720:] # Keep last 30 days of hourly data
+    data["hourly"] = h_list[-720:] 
 
     if hour_start.hour == 0:
         d_list = data.setdefault("daily", [])
         d_change = 0 if not d_list else cid - d_list[-1]["changeset_id"]
         d_list.append({"timestamp": ts_str, "changeset_id": cid, "change": d_change})
 
-    # 2. Leaderboards
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
     
