@@ -11,7 +11,6 @@ import xml.etree.ElementTree as ET
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
 VERSION = "3.2"
-# Path where the web server looks for files
 TARGET_DIR = Path("/var/www/ogfstats")
 
 VERSION_HISTORY = [
@@ -27,6 +26,15 @@ INDEX_HTML = f"""<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OGFStats</title>
+  
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-7BV9Y2QVPZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){{dataLayer.push(arguments);}}
+    gtag('js', new Date());
+    gtag('config', 'G-7BV9Y2QVPZ');
+  </script>
+
   <script src="https://code.highcharts.com/highcharts.js"></script>
   <script src="https://code.highcharts.com/modules/exporting.js"></script>
   <script src="https://code.highcharts.com/modules/full-screen.js"></script>
@@ -117,6 +125,15 @@ function showPage(pageId) {{
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
     document.getElementById(pageId).classList.add('active');
+    
+    // Google Analytics Event Tracking
+    if (typeof gtag === 'function') {{
+        gtag('event', 'page_view', {{
+            page_title: pageId,
+            page_path: '/' + pageId
+        }});
+    }}
+
     if(pageId === 'chartsPage') {{
         document.getElementById('navCharts').classList.add('active');
         if(rawData) updateCharts(rawData[mode]);
@@ -195,6 +212,8 @@ load();
 </body>
 </html>
 """
+
+# ... [The rest of the Python logic remains identical to your v3.2 script] ...
 
 def get_initial_data():
     return {
@@ -280,9 +299,7 @@ def update_data_file(out_json: Path, hour_start: datetime, cid: int, entries: li
     out_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 def main():
-    # Ensure directory exists and has correct permissions
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
-    
     index_file = TARGET_DIR / "index.html"
     index_file.write_text(INDEX_HTML, encoding='utf-8')
     data_file = TARGET_DIR / "data.json"
@@ -292,7 +309,6 @@ def main():
     while True:
         now = datetime.now(timezone.utc)
         hour_start = now.replace(minute=0, second=0, microsecond=0)
-        
         try:
             cid = fetch_first_changeset_id(OGF_CHANGESETS_URL)
             entries = fetch_changesets_for_hour(hour_start)
