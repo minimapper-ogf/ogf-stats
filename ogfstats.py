@@ -10,10 +10,11 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "3.3"
+VERSION = "3.4"
 TARGET_DIR = Path("/var/www/ogfstats")
 
 VERSION_HISTORY = [
+    {"v": "3.4", "date": "2026-01-26", "note": "Hopefuly final fix version"},
     {"v": "3.3", "date": "2026-01-26", "note": "Refined monthly reset logic to preserve chart history."},
     {"v": "3.2", "date": "2026-01-26", "note": "Optimized for static hosting in /var/www/."},
     {"v": "3.1", "date": "2026-01-26", "note": "Updated file structure, version history tab added."},
@@ -35,7 +36,6 @@ INDEX_HTML = f"""<!DOCTYPE html>
     gtag('config', 'G-7BV9Y2QVPZ');
   </script>
   <script src="https://code.highcharts.com/highcharts.js"></script>
-  <script src="https://code.highcharts.com/modules/accessibility.js"></script>
   <style>
     body {{ font-family: sans-serif; background: #fafafa; margin:0; padding:0; }}
     .nav {{ background: #333; color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }}
@@ -52,20 +52,13 @@ INDEX_HTML = f"""<!DOCTYPE html>
     .btns {{ margin-bottom: 12px; }}
     button {{ padding: 6px 12px; border:1px solid #ddd; border-radius: 6px; background:#f5f5f5; cursor:pointer; }}
     button.active {{ background:#007bff; color:white; }}
-    
     .leaderboard-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }}
-    .leaderboard-card {{ background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }}
-    .leaderboard-card h2 {{ font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid #007bff; display: inline-block; padding-bottom: 4px; }}
+    .leaderboard-card {{ background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; }}
     .table-container {{ border-radius: 12px; overflow: hidden; border: 1px solid #007bff33; margin-top: 10px; }}
     table {{ width: 100%; border-collapse: collapse; }}
-    th {{ background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; }}
-    th:hover {{ background: #0056b3; }}
+    th {{ background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; }}
     td {{ padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }}
-    tr:last-child td {{ border-bottom: none; }}
     tr:hover {{ background: #f5f9ff; }}
-    
-    .version-item {{ border-bottom: 1px solid #eee; padding: 12px 0; }}
-    .version-tag {{ background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }}
     .footer {{ text-align: center; color: #999; font-size: 12px; margin: 40px 0; }}
   </style>
 </head>
@@ -88,48 +81,20 @@ INDEX_HTML = f"""<!DOCTYPE html>
           <div id="chartDiff"></div>
         </div>
     </div>
-
     <div id="leaderboardPage" class="page">
         <h1>Leaderboards</h1>
-        <p class="meta">leaderboards by hour, day, and month. Headers sort values :)</p>
         <div class="leaderboard-grid">
-          <div class="leaderboard-card">
-            <h2>Hourly</h2>
-            <div class="table-container">
-              <table id="hourlyTable">
-                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-          <div class="leaderboard-card">
-            <h2>Daily (Rolling 24h)</h2>
-            <div class="table-container">
-              <table id="dailyTable">
-                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-          <div class="leaderboard-card">
-            <h2>Monthly</h2>
-            <div class="table-container">
-              <table id="monthlyTable">
-                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
+          <div class="leaderboard-card"><h2>Hourly</h2><table id="hourlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
+          <div class="leaderboard-card"><h2>Daily (Rolling 24h)</h2><table id="dailyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
+          <div class="leaderboard-card"><h2>Monthly</h2><table id="monthlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
         </div>
     </div>
-
     <div id="versionPage" class="page">
         <h1>Version History</h1>
         <div id="versionList"></div>
     </div>
   </div>
   <div class="footer">OGFStats by minimapper :)</div>
-
 <script>
 let mode = 'hourly';
 let rawData = null;
@@ -138,15 +103,10 @@ const historyData = {json.dumps(VERSION_HISTORY)};
 function showPage(pageId) {{
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
-    
     document.getElementById(pageId).classList.add('active');
     document.getElementById('nav_' + pageId).classList.add('active');
-    
-    if (typeof gtag === 'function') {{
-        gtag('event', 'page_view', {{ page_title: pageId, page_path: '/' + pageId }});
-    }}
-    if(pageId === 'chartsPage' && rawData) updateCharts(rawData[mode]);
     if(pageId === 'versionPage') renderVersionHistory();
+    if(pageId === 'chartsPage' && rawData) updateCharts(rawData[mode]);
 }}
 
 function setMode(m) {{
@@ -157,92 +117,37 @@ function setMode(m) {{
 }}
 
 function renderVersionHistory() {{
-    const container = document.getElementById('versionList');
-    container.innerHTML = historyData.map(v => `
-        <div class="version-item">
-            <span class="version-tag">v${{v.v}}</span> <strong>${{v.date}}</strong>
-            <p style="margin: 8px 0 0; font-size: 14px; color: #444;">${{v.note}}</p>
-        </div>
-    `).join('');
+    document.getElementById('versionList').innerHTML = historyData.map(v => `
+        <div style="border-bottom:1px solid #eee; padding:12px 0;">
+            <span style="background:#eee; padding:2px 8px; border-radius:4px; font-weight:bold;">v${{v.v}}</span> <strong>${{v.date}}</strong>
+            <p style="margin:8px 0 0; font-size:14px; color:#444;">${{v.note}}</p>
+        </div>`).join('');
 }}
 
 async function load() {{
-  try {{
     const resp = await fetch('data.json', {{ cache: 'no-store' }});
     rawData = await resp.json();
     document.getElementById('updateTime').innerText = "Last Sync: " + rawData.last_month_update;
     updateCharts(rawData[mode]);
-    updateLeaderboards(rawData);
-    initSorting();
-  }} catch(e) {{ console.error("Load failed", e); }}
+    fillTable('hourlyTable', rawData.hourly_leaderboards?.slice(-1)[0]?.leaderboard || []);
+    fillTable('dailyTable', rawData.daily_leaderboard || []);
+    fillTable('monthlyTable', rawData.monthly_leaderboard || []);
 }}
 
 function updateCharts(entries) {{
-  if(!entries) return;
-  const series = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
-  const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
-  
-  Highcharts.chart('chart', {{
-    accessibility: {{ enabled: true }},
-    chart: {{ zoomType: 'x' }},
-    title: {{ text: 'Changeset ID Trend' }},
-    xAxis: {{ type: 'datetime' }},
-    yAxis: {{ title: {{ text: 'ID' }} }},
-    series: [{{ name: 'ID', data: series, color: '#007bff' }}],
-    credits: {{ enabled: false }}
-  }});
-  
-  Highcharts.chart('chartDiff', {{
-    accessibility: {{ enabled: true }},
-    chart: {{ type: 'column', zoomType: 'x' }},
-    title: {{ text: 'Activity Volume' }},
-    xAxis: {{ type: 'datetime' }},
-    yAxis: {{ title: {{ text: 'New Changesets' }} }},
-    series: [{{ name: 'Count', data: diffSeries, color: '#007bff' }}],
-    credits: {{ enabled: false }}
-  }});
+    const series = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
+    const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
+    Highcharts.chart('chart', {{ title: {{text:'Changeset ID'}}, xAxis: {{type:'datetime'}}, series: [{{name:'ID', data:series, color:'#007bff'}}] }});
+    Highcharts.chart('chartDiff', {{ chart: {{type:'column'}}, title: {{text:'Activity'}}, xAxis: {{type:'datetime'}}, series: [{{name:'Count', data:diffSeries, color:'#007bff'}}] }});
 }}
 
-function updateLeaderboards(data) {{
-  fillTable('hourlyTable', data.hourly_leaderboards?.slice(-1)[0]?.leaderboard || []);
-  fillTable('dailyTable', data.daily_leaderboard || []);
-  fillTable('monthlyTable', data.monthly_leaderboard || []);
-}}
-
-function fillTable(tableId, list) {{
-    const body = document.querySelector(`#${{tableId}} tbody`);
+function fillTable(id, list) {{
+    const body = document.querySelector(`#${{id}} tbody`);
     body.innerHTML = list.map(u => `<tr><td>${{u.user}}</td><td>${{u.uid}}</td><td>${{u.count}}</td><td>${{u.objects}}</td></tr>`).join('');
 }}
 
-function initSorting() {{
-    document.querySelectorAll("th").forEach(th => {{
-        th.addEventListener("click", () => {{
-            const table = th.closest("table");
-            const tbody = table.querySelector("tbody");
-            const rows = Array.from(tbody.querySelectorAll("tr"));
-            const index = Array.from(th.parentElement.children).indexOf(th);
-            const ascending = !th.classList.contains("asc");
-
-            rows.sort((a, b) => {{
-                let valA = a.children[index].innerText;
-                let valB = b.children[index].innerText;
-                if (!isNaN(valA) && !isNaN(valB)) {{
-                    return ascending ? valA - valB : valB - valA;
-                }}
-                return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-            }});
-
-            table.querySelectorAll("th").forEach(h => h.classList.remove("asc", "desc"));
-            th.classList.toggle("asc", ascending);
-            th.classList.toggle("desc", !ascending);
-            tbody.innerHTML = "";
-            rows.forEach(row => tbody.appendChild(row));
-        }});
-    }});
-}}
-
 load();
-setInterval(load, 300000); 
+setInterval(load, 300000);
 </script>
 </body>
 </html>
@@ -252,21 +157,23 @@ def get_initial_data():
     return {
         "hourly": [], "daily": [], "hourly_leaderboards": [], 
         "rolling24": [], "monthly_store": [], "monthly_leaderboard": [],
-        "last_month_update": ""
+        "last_month_update": "", "seen_ids": []
     }
 
-def fetch_first_changeset_id(url: str) -> int:
+def fetch_recent_changesets(lookback_hours=2):
+    start_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    url = f"{OGF_CHANGESETS_URL}?time={start_time.strftime('%Y-%m-%dT%H:00:00Z')}"
     req = Request(url, headers={"User-Agent": f"ogf-stats-script/{VERSION}"})
-    with urlopen(req, timeout=20) as resp:
-        return int(ET.fromstring(resp.read()).find('changeset').get('id'))
-
-def fetch_changesets_for_hour(start: datetime):
-    url = f"{OGF_CHANGESETS_URL}?time={start.strftime('%Y-%m-%dT%H:00:00Z')}"
-    req = Request(url, headers={"User-Agent": f"ogf-stats-script/{VERSION}"})
-    with urlopen(req, timeout=20) as resp:
-        root = ET.fromstring(resp.read())
-    return [{"user": cs.get("user"), "uid": cs.get("uid"), "changes_count": int(cs.get("changes_count", "0"))}
-            for cs in root.findall("changeset")]
+    try:
+        with urlopen(req, timeout=20) as resp:
+            root = ET.fromstring(resp.read())
+        return [{
+            "id": cs.get("id"), "user": cs.get("user"), "uid": cs.get("uid"),
+            "changes_count": int(cs.get("changes_count", "0"))
+        } for cs in root.findall("changeset")]
+    except Exception as e:
+        print(f"Fetch error: {e}")
+        return []
 
 def tally_users(entries):
     counts = {}
@@ -278,67 +185,75 @@ def tally_users(entries):
     return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]}
             for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
 
-def update_data_file(out_json: Path, hour_start: datetime, cid: int, entries: list):
+def run_update(data_file, now):
     data = get_initial_data()
-    if out_json.exists():
-        try: data = json.loads(out_json.read_text(encoding="utf-8"))
+    if data_file.exists():
+        try: data = json.loads(data_file.read_text(encoding="utf-8"))
         except: pass
 
-    current_month_str = hour_start.strftime("%Y-%m")
-    last_update_ts = data.get("last_month_update", "")
-    if last_update_ts and current_month_str != last_update_ts[:7]:
-        archive_dir = out_json.parent / "monthly_archives"
+    # Monthly Archiving
+    current_month = now.strftime("%Y-%m")
+    last_update = data.get("last_month_update", "")
+    if last_update and current_month != last_update[:7]:
+        archive_dir = data_file.parent / "monthly_archives"
         archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_dir / f"{last_update_ts[:7]}.json"
-        archive_path.write_text(json.dumps(data, indent=2))
-        data["monthly_store"] = []
-        data["monthly_leaderboard"] = []
-        print(f"Archived month {last_update_ts[:7]}")
+        (archive_dir / f"{last_update[:7]}.json").write_text(json.dumps(data, indent=2))
+        data["monthly_store"], data["monthly_leaderboard"] = [], []
+        print(f"Archived month {last_update[:7]}")
 
-    ts_str = hour_start.strftime("%Y-%m-%dT%H:%M:%SZ")
-    data["last_month_update"] = ts_str
+    # Fetch and De-duplicate
+    raw_entries = fetch_recent_changesets()
+    seen = set(data.get("seen_ids", []))
+    new_entries = [e for e in raw_entries if e["id"] not in seen]
     
-    h_list = data.setdefault("hourly", [])
-    h_change = 0 if not h_list else cid - h_list[-1]["changeset_id"]
-    h_list.append({"timestamp": ts_str, "changeset_id": cid, "change": h_change})
-    data["hourly"] = h_list[-720:] 
+    # Track new IDs
+    for e in new_entries: seen.add(e["id"])
+    data["seen_ids"] = list(seen)[-2000:] # Keep buffer to prevent duplicates
 
-    if hour_start.hour == 0:
-        d_list = data.setdefault("daily", [])
-        d_change = 0 if not d_list else cid - d_list[-1]["changeset_id"]
-        d_list.append({"timestamp": ts_str, "changeset_id": cid, "change": d_change})
+    ts_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    data["last_month_update"] = ts_str
 
-    data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(entries)})
+    # Update Hourly Chart
+    cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
+    data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
+    data["hourly"] = data["hourly"][-720:]
+
+    # Update Daily Chart (at midnight)
+    if now.hour == 0:
+        data.setdefault("daily", []).append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
+
+    # Update Leaderboards
+    data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
     
-    data.setdefault("rolling24", []).append({"timestamp": ts_str, "entries": entries})
-    cutoff = hour_start - timedelta(hours=24)
+    data.setdefault("rolling24", []).append({"timestamp": ts_str, "entries": new_entries})
+    cutoff = now - timedelta(hours=24)
     data["rolling24"] = [r for r in data["rolling24"] if datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")).replace(tzinfo=timezone.utc) >= cutoff]
     
     data["daily_leaderboard"] = tally_users([e for r in data["rolling24"] for e in r["entries"]])
-    data.setdefault("monthly_store", []).extend(entries)
+    data.setdefault("monthly_store", []).extend(new_entries)
     data["monthly_leaderboard"] = tally_users(data["monthly_store"])
 
-    out_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    print(f"[{now.strftime('%H:%M:%S')}] Success: {cid} (+{len(new_entries)} new)")
 
 def main():
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
-    index_file = TARGET_DIR / "index.html"
-    index_file.write_text(INDEX_HTML, encoding='utf-8')
-    
+    (TARGET_DIR / "index.html").write_text(INDEX_HTML, encoding='utf-8')
+    data_file = TARGET_DIR / "data.json"
+
+    # Run once immediately
+    run_update(data_file, datetime.now(timezone.utc))
+
     while True:
         now = datetime.now(timezone.utc)
-        hour_start = now.replace(minute=0, second=0, microsecond=0)
-        try:
-            cid = fetch_first_changeset_id(OGF_CHANGESETS_URL)
-            entries = fetch_changesets_for_hour(hour_start)
-            update_data_file(TARGET_DIR / "data.json", hour_start, cid, entries)
-            print(f"[{now}] Update Success: {cid}")
-        except Exception as e:
-            print(f"[{now}] Error: {e}")
-
+        # Target 5 seconds past the next hour
         next_run = (now + timedelta(hours=1)).replace(minute=0, second=5, microsecond=0)
-        time.sleep(max(1, (next_run - now).total_seconds()))
+        sleep_time = (next_run - now).total_seconds()
+        
+        print(f"Waiting {int(sleep_time)}s until next hour...")
+        time.sleep(sleep_time)
+        run_update(data_file, datetime.now(timezone.utc))
 
 if __name__ == "__main__":
     main()
