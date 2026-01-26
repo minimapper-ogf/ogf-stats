@@ -12,7 +12,7 @@ import socket
 
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "3.1"
+VERSION = "3.2"
 VERSION_HISTORY = [
     {"v": "3.2", "date": "2026-01-26", "note": "Created local and public versions. No changes to local"},
     {"v": "3.1", "date": "2026-01-26", "note": "Added version history, hopefully improved data saving."},
