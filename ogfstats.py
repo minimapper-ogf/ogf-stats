@@ -89,48 +89,30 @@ INDEX_HTML = f"""<!DOCTYPE html>
           <div id="chartDiff"></div>
         </div>
     </div>
-
     <div id="leaderboardPage" class="page">
         <h1>Leaderboards</h1>
         <p class="meta">leaderboards by hour, day, and month. Headers sort values :)</p>
         <div class="leaderboard-grid">
           <div class="leaderboard-card">
             <h2>Hourly</h2>
-            <div class="table-container">
-              <table id="hourlyTable">
-                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
+            <div class="table-container"><table id="hourlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
           </div>
           <div class="leaderboard-card">
             <h2>Daily (Rolling 24h)</h2>
-            <div class="table-container">
-              <table id="dailyTable">
-                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
+            <div class="table-container"><table id="dailyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
           </div>
           <div class="leaderboard-card">
             <h2>Monthly</h2>
-            <div class="table-container">
-              <table id="monthlyTable">
-                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
+            <div class="table-container"><table id="monthlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div>
           </div>
         </div>
     </div>
-
     <div id="versionPage" class="page">
         <h1>Version History</h1>
         <div id="versionList"></div>
     </div>
   </div>
   <div class="footer">OGFStats by minimapper :)</div>
-
 <script>
 let mode = 'hourly';
 let rawData = null;
@@ -139,13 +121,9 @@ const historyData = {json.dumps(VERSION_HISTORY)};
 function showPage(pageId) {{
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
-    
     document.getElementById(pageId).classList.add('active');
     document.getElementById('nav_' + pageId).classList.add('active');
-    
-    if (typeof gtag === 'function') {{
-        gtag('event', 'page_view', {{ page_title: pageId, page_path: '/' + pageId }});
-    }}
+    if (typeof gtag === 'function') {{ gtag('event', 'page_view', {{ page_title: pageId, page_path: '/' + pageId }}); }}
     if(pageId === 'chartsPage' && rawData) updateCharts(rawData[mode]);
     if(pageId === 'versionPage') renderVersionHistory();
 }}
@@ -182,26 +160,8 @@ function updateCharts(entries) {{
   if(!entries) return;
   const series = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
   const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
-  
-  Highcharts.chart('chart', {{
-    accessibility: {{ enabled: true }},
-    chart: {{ zoomType: 'x' }},
-    title: {{ text: 'Changeset ID Trend' }},
-    xAxis: {{ type: 'datetime' }},
-    yAxis: {{ title: {{ text: 'ID' }} }},
-    series: [{{ name: 'ID', data: series, color: '#007bff' }}],
-    credits: {{ enabled: false }}
-  }});
-  
-  Highcharts.chart('chartDiff', {{
-    accessibility: {{ enabled: true }},
-    chart: {{ type: 'column', zoomType: 'x' }},
-    title: {{ text: 'Activity Volume' }},
-    xAxis: {{ type: 'datetime' }},
-    yAxis: {{ title: {{ text: 'New Changesets' }} }},
-    series: [{{ name: 'Count', data: diffSeries, color: '#007bff' }}],
-    credits: {{ enabled: false }}
-  }});
+  Highcharts.chart('chart', {{ accessibility: {{ enabled: true }}, chart: {{ zoomType: 'x' }}, title: {{ text: 'Changeset ID Trend' }}, xAxis: {{ type: 'datetime' }}, series: [{{ name: 'ID', data: series, color: '#007bff' }}], credits: {{ enabled: false }} }});
+  Highcharts.chart('chartDiff', {{ accessibility: {{ enabled: true }}, chart: {{ type: 'column', zoomType: 'x' }}, title: {{ text: 'Activity Volume' }}, xAxis: {{ type: 'datetime' }}, series: [{{ name: 'Count', data: diffSeries, color: '#007bff' }}], credits: {{ enabled: false }} }});
 }}
 
 function updateLeaderboards(data) {{
@@ -223,16 +183,12 @@ function initSorting() {{
             const rows = Array.from(tbody.querySelectorAll("tr"));
             const index = Array.from(th.parentElement.children).indexOf(th);
             const ascending = !th.classList.contains("asc");
-
             rows.sort((a, b) => {{
                 let valA = a.children[index].innerText;
                 let valB = b.children[index].innerText;
-                if (!isNaN(valA) && !isNaN(valB)) {{
-                    return ascending ? valA - valB : valB - valA;
-                }}
+                if (!isNaN(valA) && !isNaN(valB)) {{ return ascending ? valA - valB : valB - valA; }}
                 return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
             }});
-
             table.querySelectorAll("th").forEach(h => h.classList.remove("asc", "desc"));
             th.classList.toggle("asc", ascending);
             th.classList.toggle("desc", !ascending);
@@ -241,7 +197,6 @@ function initSorting() {{
         }});
     }});
 }}
-
 load();
 setInterval(load, 300000); 
 </script>
@@ -250,11 +205,7 @@ setInterval(load, 300000);
 """
 
 def get_initial_data():
-    return {
-        "hourly": [], "daily": [], "hourly_leaderboards": [], 
-        "rolling24": [], "monthly_store": [], "monthly_leaderboard": [],
-        "last_month_update": "", "seen_ids": []
-    }
+    return {"hourly": [], "daily": [], "hourly_leaderboards": [], "rolling24": [], "monthly_store": [], "monthly_leaderboard": [], "last_month_update": "", "seen_ids": []}
 
 def fetch_recent_changesets(lookback_hours=2):
     start_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
@@ -263,23 +214,17 @@ def fetch_recent_changesets(lookback_hours=2):
     try:
         with urlopen(req, timeout=20) as resp:
             root = ET.fromstring(resp.read())
-        return [{
-            "id": cs.get("id"), "user": cs.get("user"), "uid": cs.get("uid"),
-            "changes_count": int(cs.get("changes_count", "0"))
-        } for cs in root.findall("changeset")]
+        return [{"id": cs.get("id"), "user": cs.get("user"), "uid": cs.get("uid"), "changes_count": int(cs.get("changes_count", "0"))} for cs in root.findall("changeset")]
     except Exception as e:
-        print(f"Fetch error: {e}")
-        return []
+        print(f"Fetch error: {e}"); return []
 
 def tally_users(entries):
     counts = {}
     for e in entries:
         key = (e["user"], e["uid"])
         if key not in counts: counts[key] = {"count": 0, "objects": 0}
-        counts[key]["count"] += 1
-        counts[key]["objects"] += e.get("changes_count", 0)
-    return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]}
-            for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
+        counts[key]["count"] += 1; counts[key]["objects"] += e.get("changes_count", 0)
+    return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]} for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
 
 def run_update(data_file, now):
     data = get_initial_data()
@@ -287,7 +232,6 @@ def run_update(data_file, now):
         try: data = json.loads(data_file.read_text(encoding="utf-8"))
         except: pass
 
-    # Monthly Archiving
     current_month = now.strftime("%Y-%m")
     last_update = data.get("last_month_update", "")
     if last_update and current_month != last_update[:7]:
@@ -295,41 +239,28 @@ def run_update(data_file, now):
         archive_dir.mkdir(parents=True, exist_ok=True)
         (archive_dir / f"{last_update[:7]}.json").write_text(json.dumps(data, indent=2))
         data["monthly_store"], data["monthly_leaderboard"] = [], []
-        print(f"Archived month {last_update[:7]}")
 
-    # Fetch and De-duplicate
     raw_entries = fetch_recent_changesets()
     seen = set(data.get("seen_ids", []))
     new_entries = [e for e in raw_entries if e["id"] not in seen]
-    
-    # Track new IDs
     for e in new_entries: seen.add(e["id"])
-    data["seen_ids"] = list(seen)[-2000:] # Keep buffer to prevent duplicates
+    data["seen_ids"] = list(seen)[-2000:]
 
     ts_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     data["last_month_update"] = ts_str
-
-    # Update Hourly Chart
     cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
     data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
     data["hourly"] = data["hourly"][-720:]
 
-    # Update Daily Chart (at midnight)
-    if now.hour == 0:
-        data.setdefault("daily", []).append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
-
-    # Update Leaderboards
+    if now.hour == 0: data.setdefault("daily", []).append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
-    
     data.setdefault("rolling24", []).append({"timestamp": ts_str, "entries": new_entries})
     cutoff = now - timedelta(hours=24)
     data["rolling24"] = [r for r in data["rolling24"] if datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")).replace(tzinfo=timezone.utc) >= cutoff]
-    
     data["daily_leaderboard"] = tally_users([e for r in data["rolling24"] for e in r["entries"]])
     data.setdefault("monthly_store", []).extend(new_entries)
     data["monthly_leaderboard"] = tally_users(data["monthly_store"])
-
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
     print(f"[{now.strftime('%H:%M:%S')}] Success: {cid} (+{len(new_entries)} new)")
 
@@ -337,16 +268,11 @@ def main():
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
     (TARGET_DIR / "index.html").write_text(INDEX_HTML, encoding='utf-8')
     data_file = TARGET_DIR / "data.json"
-
-    # Run once immediately
     run_update(data_file, datetime.now(timezone.utc))
-
     while True:
         now = datetime.now(timezone.utc)
-        # Target 5 seconds past the next hour
         next_run = (now + timedelta(hours=1)).replace(minute=0, second=5, microsecond=0)
         sleep_time = (next_run - now).total_seconds()
-        
         print(f"Waiting {int(sleep_time)}s until next hour...")
         time.sleep(sleep_time)
         run_update(data_file, datetime.now(timezone.utc))
