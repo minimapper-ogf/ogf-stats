@@ -35,6 +35,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
     gtag('config', 'G-7BV9Y2QVPZ');
   </script>
   <script src="https://code.highcharts.com/highcharts.js"></script>
+  <script src="https://code.highcharts.com/modules/accessibility.js"></script>
   <style>
     body {{ font-family: sans-serif; background: #fafafa; margin:0; padding:0; }}
     .nav {{ background: #333; color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }}
@@ -52,7 +53,6 @@ INDEX_HTML = f"""<!DOCTYPE html>
     button {{ padding: 6px 12px; border:1px solid #ddd; border-radius: 6px; background:#f5f5f5; cursor:pointer; }}
     button.active {{ background:#007bff; color:white; }}
     
-    /* Table Styling with Rounded Corners */
     .leaderboard-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }}
     .leaderboard-card {{ background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }}
     .leaderboard-card h2 {{ font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid #007bff; display: inline-block; padding-bottom: 4px; }}
@@ -60,8 +60,6 @@ INDEX_HTML = f"""<!DOCTYPE html>
     table {{ width: 100%; border-collapse: collapse; }}
     th {{ background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; }}
     th:hover {{ background: #0056b3; }}
-    th.asc::after {{ content: " ↑"; }}
-    th.desc::after {{ content: " ↓"; }}
     td {{ padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }}
     tr:last-child td {{ border-bottom: none; }}
     tr:hover {{ background: #f5f9ff; }}
@@ -73,9 +71,9 @@ INDEX_HTML = f"""<!DOCTYPE html>
 </head>
 <body>
   <div class="nav">
-    <a id="navCharts" class="active" onclick="showPage('chartsPage')">Charts</a>
-    <a id="navLeaderboards" onclick="showPage('leaderboardPage')">Leaderboards</a>
-    <a id="navVersion" onclick="showPage('versionPage')">v{VERSION}</a>
+    <a id="nav_chartsPage" class="active" onclick="showPage('chartsPage')">Charts</a>
+    <a id="nav_leaderboardPage" onclick="showPage('leaderboardPage')">Leaderboards</a>
+    <a id="nav_versionPage" onclick="showPage('versionPage')">v{VERSION}</a>
   </div>
   <div class="wrap">
     <div id="chartsPage" class="page active">
@@ -93,13 +91,13 @@ INDEX_HTML = f"""<!DOCTYPE html>
 
     <div id="leaderboardPage" class="page">
         <h1>Leaderboards</h1>
-        <p class="meta">Click headers to sort. Rolling 24h and Monthly data.</p>
+        <p class="meta">Click headers to sort. Daily is a rolling 24-hour window.</p>
         <div class="leaderboard-grid">
           <div class="leaderboard-card">
             <h2>Hourly</h2>
             <div class="table-container">
               <table id="hourlyTable">
-                <thead><tr><th onclick="sortTable('hourlyTable', 0)">User</th><th onclick="sortTable('hourlyTable', 1)">UID</th><th onclick="sortTable('hourlyTable', 2)">Edits</th><th onclick="sortTable('hourlyTable', 3)">Objs</th></tr></thead>
+                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
                 <tbody></tbody>
               </table>
             </div>
@@ -108,7 +106,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
             <h2>Daily (Rolling 24h)</h2>
             <div class="table-container">
               <table id="dailyTable">
-                <thead><tr><th onclick="sortTable('dailyTable', 0)">User</th><th onclick="sortTable('dailyTable', 1)">UID</th><th onclick="sortTable('dailyTable', 2)">Edits</th><th onclick="sortTable('dailyTable', 3)">Objs</th></tr></thead>
+                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
                 <tbody></tbody>
               </table>
             </div>
@@ -117,7 +115,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
             <h2>Monthly</h2>
             <div class="table-container">
               <table id="monthlyTable">
-                <thead><tr><th onclick="sortTable('monthlyTable', 0)">User</th><th onclick="sortTable('monthlyTable', 1)">UID</th><th onclick="sortTable('monthlyTable', 2)">Edits</th><th onclick="sortTable('monthlyTable', 3)">Objs</th></tr></thead>
+                <thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead>
                 <tbody></tbody>
               </table>
             </div>
@@ -130,7 +128,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
         <div id="versionList"></div>
     </div>
   </div>
-  <div class="footer">OGFStats &copy; 2026 | Automated Updates</div>
+  <div class="footer">OGFStats &copy; 2026 | Automated Sync</div>
 
 <script>
 let mode = 'hourly';
@@ -140,12 +138,9 @@ const historyData = {json.dumps(VERSION_HISTORY)};
 function showPage(pageId) {{
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
-    document.getElementById(pageId).classList.add('active');
     
-    let navId = 'navCharts';
-    if(pageId === 'leaderboardPage') navId = 'navLeaderboards';
-    if(pageId === 'versionPage') navId = 'navVersion';
-    document.getElementById(navId).classList.add('active');
+    document.getElementById(pageId).classList.add('active');
+    document.getElementById('nav_' + pageId).classList.add('active');
     
     if (typeof gtag === 'function') {{
         gtag('event', 'page_view', {{ page_title: pageId, page_path: '/' + pageId }});
@@ -178,6 +173,7 @@ async function load() {{
     document.getElementById('updateTime').innerText = "Last Sync: " + rawData.last_month_update;
     updateCharts(rawData[mode]);
     updateLeaderboards(rawData);
+    initSorting();
   }} catch(e) {{ console.error("Load failed", e); }}
 }}
 
@@ -187,6 +183,7 @@ function updateCharts(entries) {{
   const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
   
   Highcharts.chart('chart', {{
+    accessibility: {{ enabled: true }},
     chart: {{ zoomType: 'x' }},
     title: {{ text: 'Changeset ID Trend' }},
     xAxis: {{ type: 'datetime' }},
@@ -196,6 +193,7 @@ function updateCharts(entries) {{
   }});
   
   Highcharts.chart('chartDiff', {{
+    accessibility: {{ enabled: true }},
     chart: {{ type: 'column', zoomType: 'x' }},
     title: {{ text: 'Activity Volume' }},
     xAxis: {{ type: 'datetime' }},
@@ -216,26 +214,31 @@ function fillTable(tableId, list) {{
     body.innerHTML = list.map(u => `<tr><td>${{u.user}}</td><td>${{u.uid}}</td><td>${{u.count}}</td><td>${{u.objects}}</td></tr>`).join('');
 }}
 
-function sortTable(tableId, colIndex) {{
-    const table = document.getElementById(tableId);
-    const tbody = table.querySelector('tbody');
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    const th = table.querySelectorAll('th')[colIndex];
-    const isAsc = !th.classList.contains('asc');
-    
-    rows.sort((a, b) => {{
-        let valA = a.children[colIndex].innerText;
-        let valB = b.children[colIndex].innerText;
-        if (!isNaN(valA) && !isNaN(valB)) {{
-            return isAsc ? valA - valB : valB - valA;
-        }}
-        return isAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+function initSorting() {{
+    document.querySelectorAll("th").forEach(th => {{
+        th.addEventListener("click", () => {{
+            const table = th.closest("table");
+            const tbody = table.querySelector("tbody");
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            const index = Array.from(th.parentElement.children).indexOf(th);
+            const ascending = !th.classList.contains("asc");
+
+            rows.sort((a, b) => {{
+                let valA = a.children[index].innerText;
+                let valB = b.children[index].innerText;
+                if (!isNaN(valA) && !isNaN(valB)) {{
+                    return ascending ? valA - valB : valB - valA;
+                }}
+                return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            }});
+
+            table.querySelectorAll("th").forEach(h => h.classList.remove("asc", "desc"));
+            th.classList.toggle("asc", ascending);
+            th.classList.toggle("desc", !ascending);
+            tbody.innerHTML = "";
+            rows.forEach(row => tbody.appendChild(row));
+        }});
     }});
-    
-    table.querySelectorAll('th').forEach(h => h.classList.remove('asc', 'desc'));
-    th.classList.add(isAsc ? 'asc' : 'desc');
-    tbody.innerHTML = '';
-    rows.forEach(row => tbody.appendChild(row));
 }}
 
 load();
