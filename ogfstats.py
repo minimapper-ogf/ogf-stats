@@ -53,7 +53,6 @@ INDEX_HTML = f"""<!DOCTYPE html>
     .btns {{ margin-bottom: 12px; }}
     button {{ padding: 6px 12px; border:1px solid #ddd; border-radius: 6px; background:#f5f5f5; cursor:pointer; }}
     button.active {{ background:#007bff; color:white; }}
-    
     .leaderboard-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }}
     .leaderboard-card {{ background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }}
     .leaderboard-card h2 {{ font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid #007bff; display: inline-block; padding-bottom: 4px; }}
@@ -64,7 +63,6 @@ INDEX_HTML = f"""<!DOCTYPE html>
     td {{ padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }}
     tr:last-child td {{ border-bottom: none; }}
     tr:hover {{ background: #f5f9ff; }}
-    
     .version-item {{ border-bottom: 1px solid #eee; padding: 12px 0; }}
     .version-tag {{ background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }}
     .footer {{ text-align: center; color: #999; font-size: 12px; margin: 40px 0; }}
@@ -232,6 +230,7 @@ def run_update(data_file, now):
         try: data = json.loads(data_file.read_text(encoding="utf-8"))
         except: pass
 
+    # ARCHIVING
     current_month = now.strftime("%Y-%m")
     last_update = data.get("last_month_update", "")
     if last_update and current_month != last_update[:7]:
@@ -240,19 +239,39 @@ def run_update(data_file, now):
         (archive_dir / f"{last_update[:7]}.json").write_text(json.dumps(data, indent=2))
         data["monthly_store"], data["monthly_leaderboard"] = [], []
 
+    # FETCHING
     raw_entries = fetch_recent_changesets()
     seen = set(data.get("seen_ids", []))
     new_entries = [e for e in raw_entries if e["id"] not in seen]
     for e in new_entries: seen.add(e["id"])
     data["seen_ids"] = list(seen)[-2000:]
 
-    ts_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    data["last_month_update"] = ts_str
-    cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
-    data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
-    data["hourly"] = data["hourly"][-720:]
+    # BUCKETING LOGIC: Force to top of hour
+    bucket_ts = now.replace(minute=0, second=0, microsecond=0)
+    ts_str = bucket_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    data["last_month_update"] = now.strftime("%Y-%m-%dT%H:%M:%SZ") # Keep real time for sync display
 
-    if now.hour == 0: data.setdefault("daily", []).append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
+    cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
+
+    # Hourly Point Merging
+    existing_hourly = next((item for item in data["hourly"] if item["timestamp"] == ts_str), None)
+    if existing_hourly:
+        existing_hourly["change"] += len(new_entries)
+        existing_hourly["changeset_id"] = cid
+    else:
+        data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
+        data["hourly"] = data["hourly"][-720:]
+
+    # Daily bucket (Midnight)
+    if now.hour == 0:
+        existing_daily = next((item for item in data.get("daily", []) if item["timestamp"] == ts_str), None)
+        if existing_daily:
+            existing_daily["change"] += len(new_entries)
+            existing_daily["changeset_id"] = cid
+        else:
+            data.setdefault("daily", []).append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
+
+    # Leaderboards
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
     data.setdefault("rolling24", []).append({"timestamp": ts_str, "entries": new_entries})
@@ -261,8 +280,9 @@ def run_update(data_file, now):
     data["daily_leaderboard"] = tally_users([e for r in data["rolling24"] for e in r["entries"]])
     data.setdefault("monthly_store", []).extend(new_entries)
     data["monthly_leaderboard"] = tally_users(data["monthly_store"])
+
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print(f"[{now.strftime('%H:%M:%S')}] Success: {cid} (+{len(new_entries)} new)")
+    print(f"[{now.strftime('%H:%M:%S')}] Success: {cid} (+{len(new_entries)} new) bucketed to {ts_str}")
 
 def main():
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
