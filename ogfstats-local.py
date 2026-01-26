@@ -14,6 +14,7 @@ import socket
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
 VERSION = "3.1"
 VERSION_HISTORY = [
+    {"v": "3.2", "date": "2026-01-26", "note": "Created local and public versions. No changes to local"},
     {"v": "3.1", "date": "2026-01-26", "note": "Added version history, hopefully improved data saving."},
     {"v": "3.0", "date": "2026-01-26", "note": "Added monthly stats, seperated charts from tables into two pages (can be navigated between with the top menu)"},
     {"v": "2.0", "date": "2025-08-22", "note": "First documented version of ogfedit (no clue what happened to v1). Includes hourly/daily stats for changeset id and by-user stats (again, hourly and daily)"}
