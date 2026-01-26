@@ -14,7 +14,7 @@ VERSION = "3.4"
 TARGET_DIR = Path("/var/www/ogfstats")
 
 VERSION_HISTORY = [
-    {"v": "3.4", "date": "2026-01-26", "note": "Hopefuly final fix version"},
+    {"v": "3.4", "date": "2026-01-26", "note": "Bug Fixes"},
     {"v": "3.3", "date": "2026-01-26", "note": "Refined monthly reset logic to preserve chart history."},
     {"v": "3.2", "date": "2026-01-26", "note": "Optimized for static hosting in /var/www/."},
     {"v": "3.1", "date": "2026-01-26", "note": "Updated file structure, version history tab added."},
