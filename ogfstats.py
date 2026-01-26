@@ -128,7 +128,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
         <div id="versionList"></div>
     </div>
   </div>
-  <div class="footer">OGFStats &copy; 2026 | Automated Sync</div>
+  <div class="footer">OGFStats by minimapper :)</div>
 
 <script>
 let mode = 'hourly';
@@ -198,7 +198,7 @@ function updateCharts(entries) {{
     title: {{ text: 'Activity Volume' }},
     xAxis: {{ type: 'datetime' }},
     yAxis: {{ title: {{ text: 'New Changesets' }} }},
-    series: [{{ name: 'Count', data: diffSeries, color: '#28a745' }}],
+    series: [{{ name: 'Count', data: diffSeries, color: '#7cb5ec' }}],
     credits: {{ enabled: false }}
   }});
 }}
