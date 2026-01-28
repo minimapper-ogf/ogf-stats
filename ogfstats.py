@@ -11,11 +11,12 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "4.0"
+VERSION = "4.1"
 TARGET_DIR = Path("/var/www/ogfstats")
 
 VERSION_HISTORY = [
-    {"v": "4.0", "date": "2026-01-26", "note": "New Territory Stats tab. TStats updates daily with node, way, and relation counts for each claimed territory. Seperated all tabss into unique pages to make farther expansion easier."},
+    {"v": "4.1", "date": "2026-01-28", "note": "Fixed errors with slashes and commas in place names (stupid me thought that would not happen and I put it in a CSV)"},
+    {"v": "4.0", "date": "2026-01-28", "note": "New Territory Stats tab. TStats updates daily with node, way, and relation counts for each claimed territory. Seperated all tabss into unique pages to make farther expansion easier."},
     {"v": "3.3", "date": "2026-01-26", "note": "Refined monthly reset logic to preserve chart history."},
     {"v": "3.2", "date": "2026-01-26", "note": "Optimized for static hosting in /var/www/."},
     {"v": "3.1", "date": "2026-01-26", "note": "Updated file structure, version history tab added."},
