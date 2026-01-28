@@ -67,7 +67,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div class="nav"><a href="index.html">Charts</a><a href="leaderboards.html">Leaderboards</a><a class="active">Territory Stats</a><a href="version.html">v4.0</a></div>
+<div class="nav"><a href="index.html">Charts</a><a href="leaderboards.html">Leaderboards</a><a class="active">Territory Stats</a><a href="version.html">v4.1</a></div>
 <div class="wrap">
     <div class="header-section"><h1>Territory Evolution Stats</h1><p class="meta" id="updateTime">Loading data...</p></div>
     <div class="dashboard-container">
