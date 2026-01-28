@@ -10,7 +10,6 @@ from datetime import datetime
 TERRITORY_URL = "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration?action=raw"
 OVERPASS_URL = "https://overpass.opengeofiction.net/api/interpreter"
 
-
 DATA_DIR = "/var/www/ogfstats/tdata"
 ADMIN_DIR = os.path.join(DATA_DIR, "territory-admin")
 STATS_DIR = os.path.join(DATA_DIR, "territory")
@@ -102,14 +101,12 @@ async function loadCSV(path) {
 async function buildDashboard() {
     const snapshot = await loadCSV("./tdata/territory-latest.csv");
 
-    // 1. Initialize empty line charts
     lineCharts = [
         createLineChart("nodesHist", "Nodes Over Time", "Nodes"),
         createLineChart("waysHist", "Ways Over Time", "Ways"),
         createLineChart("relationsHist", "Relations Over Time", "Relations")
     ];
 
-    // 2. Load Bar Charts immediately using the snapshot
     const barData = {
         nodes: snapshot.map(r => ({ name: r.territory, y: +r.nodes })),
         ways: snapshot.map(r => ({ name: r.territory, y: +r.ways })),
@@ -119,12 +116,11 @@ async function buildDashboard() {
     createBarChart("waysBar", "Current Ways", "Ways", barData.ways, '#007bff');
     createBarChart("relationsBar", "Current Relations", "Relations", barData.relations, '#007bff');
 
-    // 3. Populate List and handle Load-on-Demand
     const listBody = document.getElementById('territoryList');
     snapshot.sort((a,b) => a.territory.localeCompare(b.territory)).forEach((row, i) => {
         const name = row.territory;
         const tr = document.createElement('tr');
-        const shouldAutoLoad = i < 5; // Load first 5 automatically
+        const shouldAutoLoad = i < 5;
 
         tr.innerHTML = `<td><input type="checkbox" class="chk" data-name="${name}" data-rel="${row.rel}" ${shouldAutoLoad ? 'checked' : ''}></td><td>${name}</td>`;
         tr.onclick = (e) => {
@@ -146,7 +142,12 @@ async function buildDashboard() {
 async function toggleTerritory(name, rel, state) {
     if (state) {
         if (!loadedData[name]) {
-            const safeName = name.replace(/ /g, "_");
+            // MATCH PYTHON SCRUBBING: Remove commas, replace slashes with dashes, spaces with underscores
+            const safeName = name.replace(/,/g, "")
+                                 .replace(/\\//g, "-")
+                                 .replace(/\\\\/g, "-")
+                                 .replace(/ /g, "_");
+            
             const file = `tdata/territory/${safeName}_${rel}.csv`;
             try {
                 const rows = await loadCSV(file);
@@ -179,7 +180,8 @@ function createLineChart(id, title, yAxisName) {
         tooltip: { shared: true, crosshairs: true },
         plotOptions: {
             series: {
-                marker: { enabled: false },
+                marker: { enabled: true, radius: 2 }, // Show points clearly
+                dataGrouping: { enabled: false },    // Don't merge close data points
                 stickyTracking: true,
                 findNearestPointBy: 'x',
                 turboThreshold: 0,
@@ -251,9 +253,8 @@ def parse_overpass(data):
     counts = next(el["tags"] for el in data["elements"] if el["type"] == "count")
     name = next((el.get("tags", {}).get("name", "unknown") for el in data["elements"] if el["type"] == "relation"), "unknown")
     
-    # SCRUBBING: Remove commas and hidden line breaks
+    # SCRUBBING: Remove commas and hidden line breaks for CSV safety
     name = name.replace('\n', ' ').replace('\r', ' ').replace(',', '').strip()
-    # Clean up double spaces if any
     name = " ".join(name.split())
     
     return name, {k: int(counts[k]) for k in ["nodes", "ways", "relations", "areas", "total"]}
@@ -282,8 +283,8 @@ def main():
             print(f"  ❌ Failed rel {rel_id}: {e}")
             continue
 
-        # FILENAME SAFETY: Keep scripts like ꢡ, but remove commas and slashes
-        safe_name = name.replace("/", "-").replace("\\", "-").replace(" ", "_").replace(",", "")
+        # FILENAME SAFETY: remove commas, turn slashes to dashes
+        safe_name = name.replace(",", "").replace("/", "-").replace("\\", "-").replace(" ", "_")
         
         # 1. Append to History
         hist_path = os.path.join(STATS_DIR, f"{safe_name}_{rel_id}.csv")
@@ -294,7 +295,7 @@ def main():
                 writer.writerow(["timestamp", "nodes", "ways", "relations", "areas", "total"])
             writer.writerow([timestamp, stats["nodes"], stats["ways"], stats["relations"], stats["areas"], stats["total"]])
 
-        # 2. Update Latest Snapshot LIVE
+        # 2. Update Latest Snapshot
         mode = 'w' if i == 0 else 'a'
         with open(LATEST_FILE, mode, newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
