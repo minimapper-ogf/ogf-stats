@@ -66,7 +66,8 @@ STYLE_BLOCK = """
     .leaderboard-card h2 { font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid #007bff; display: inline-block; padding-bottom: 4px; }
     .table-container { border-radius: 12px; overflow: hidden; border: 1px solid #007bff33; margin-top: 10px; }
     table { width: 100%; border-collapse: collapse; }
-    th { background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; }
+    th { background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; transition: background 0.2s; }
+    th:hover { background: #0056b3; } /* Slightly darker blue on hover */
     td { padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }
     tr:hover { background: #f5f9ff; }
     .version-item { border-bottom: 1px solid #eee; padding: 12px 0; }
@@ -134,16 +135,50 @@ LEADERBOARD_HTML = f"""<!DOCTYPE html>
   <div class="wrap">
     <h1>Leaderboards</h1>
     <div class="leaderboard-grid">
-      <div class="leaderboard-card"><h2>Hourly</h2><div class="table-container"><table id="hourlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="leaderboard-card"><h2>Daily</h2><div class="table-container"><table id="dailyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="leaderboard-card"><h2>Monthly</h2><div class="table-container"><table id="monthlyTable"><thead><tr><th>User</th><th>UID</th><th>Edits</th><th>Objs</th></tr></thead><tbody></tbody></table></div></div>
+      <div class="leaderboard-card"><h2>Hourly</h2><div class="table-container"><table id="hourlyTable"><thead><tr><th onclick="sortRows('hourlyTable', 0)">User</th><th onclick="sortRows('hourlyTable', 1)">UID</th><th onclick="sortRows('hourlyTable', 2)">Edits</th><th onclick="sortRows('hourlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
+      <div class="leaderboard-card"><h2>Daily</h2><div class="table-container"><table id="dailyTable"><thead><tr><th onclick="sortRows('dailyTable', 0)">User</th><th onclick="sortRows('dailyTable', 1)">UID</th><th onclick="sortRows('dailyTable', 2)">Edits</th><th onclick="sortRows('dailyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
+      <div class="leaderboard-card"><h2>Monthly</h2><div class="table-container"><table id="monthlyTable"><thead><tr><th onclick="sortRows('monthlyTable', 0)">User</th><th onclick="sortRows('monthlyTable', 1)">UID</th><th onclick="sortRows('monthlyTable', 2)">Edits</th><th onclick="sortRows('monthlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
     </div>
   </div>
   <script>
     document.getElementById('nav_leaderboards').classList.add('active');
+
+    let sortDirections = {{}};
+
     function fillTable(id, list) {{
         document.querySelector(`#${{id}} tbody`).innerHTML = list.map(u => `<tr><td>${{u.user}}</td><td>${{u.uid}}</td><td>${{u.count}}</td><td>${{u.objects}}</td></tr>`).join('');
     }}
+
+    function sortRows(tableId, colIndex) {{
+        const table = document.getElementById(tableId);
+        const tbody = table.tBodies[0];
+        const rows = Array.from(tbody.rows);
+
+        // Track sort direction for this specific table and column
+        const sortKey = tableId + colIndex;
+        sortDirections[sortKey] = !sortDirections[sortKey];
+        const ascending = sortDirections[sortKey];
+
+        const sortedRows = rows.sort((a, b) => {{
+            const valA = a.cells[colIndex].innerText;
+            const valB = b.cells[colIndex].innerText;
+
+            // Check if we are sorting numbers or strings
+            const numA = parseFloat(valA);
+            const numB = parseFloat(valB);
+
+            if (!isNaN(numA) && !isNaN(numB)) {{
+                return ascending ? numA - numB : numB - numA;
+            }} else {{
+                return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            }}
+        }});
+
+        // Re-append rows to the tbody
+        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+        tbody.append(...sortedRows);
+    }}
+
     async function load() {{
         const resp = await fetch('data.json', {{ cache: 'no-store' }});
         const data = await resp.json();
