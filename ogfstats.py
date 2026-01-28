@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
 VERSION = "4.0"
-TARGET_DIR = Path("data/")
+TARGET_DIR = Path("/var/www/ogfstats")
 
 VERSION_HISTORY = [
     {"v": "4.0", "date": "2026-01-26", "note": "New Territory Stats tab. TStats updates daily with node, way, and relation counts for each claimed territory. Seperated all tabss into unique pages to make farther expansion easier."},
