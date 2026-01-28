@@ -30,7 +30,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OGF Territory Stats</title>
+<title>OGFStats - Territory Stats</title>
 <script src="https://code.highcharts.com/highcharts.js"></script>
 <script src="https://code.highcharts.com/modules/accessibility.js"></script>
 <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
@@ -64,7 +64,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
 <div class="nav"><a href="index.html">Charts</a><a href="leaderboards.html">Leaderboards</a><a class="active">Territory Stats</a><a href="version.html">v4.0</a></div>
 <div class="wrap">
-    <div class="header-section"><h1>Territory Evolution Stats</h1><p class="meta" id="updateTime">Loading data...</p></div>
+    <div class="header-section"><h1>Territory Object Count</h1><p class="meta" id="updateTime">Loading data...</p></div>
     <div class="dashboard-container">
         <aside class="control-panel">
             <input type="text" id="search" class="search-box" placeholder="Search territories...">
