@@ -33,6 +33,18 @@ NAV_BAR = f"""
   </div>
 """
 
+# --- GOOGLE FUNCTIONALITY ---
+GOOGLE_BLOCK = """
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-7BV9Y2QVPZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-7BV9Y2QVPZ');
+</script>
+"""
+
+
 STYLE_BLOCK = """
   <style>
     body { font-family: sans-serif; background: #fafafa; margin:0; padding:0; }
@@ -67,6 +79,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" /><title>OGFStats - Charts</title>
+  {GOOGLE_BLOCK}
   {STYLE_BLOCK}
   <script src="https://code.highcharts.com/highcharts.js"></script>
 </head>
@@ -112,6 +125,7 @@ LEADERBOARD_HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" /><title>OGFStats - Leaderboards</title>
+  {GOOGLE_BLOCK}
   {STYLE_BLOCK}
 </head>
 <body>
@@ -143,7 +157,7 @@ LEADERBOARD_HTML = f"""<!DOCTYPE html>
 # --- 3. VERSION.HTML ---
 VERSION_HTML = f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8" /><title>Version History</title>{STYLE_BLOCK}</head>
+<head><meta charset="UTF-8" /><title>Version History</title>{GOOGLE_BLOCK}{STYLE_BLOCK}</head>
 <body>
   {NAV_BAR}
   <div class="wrap">
