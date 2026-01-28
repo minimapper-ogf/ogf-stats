@@ -10,14 +10,13 @@ from datetime import datetime
 TERRITORY_URL = "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration?action=raw"
 OVERPASS_URL = "https://overpass.opengeofiction.net/api/interpreter"
 
-DATA_DIR = "data/tdata"
-# DATA_DIR = "/var/www/ogfstats/tdata"
+
+DATA_DIR = "/var/www/ogfstats/tdata"
 ADMIN_DIR = os.path.join(DATA_DIR, "territory-admin")
 STATS_DIR = os.path.join(DATA_DIR, "territory")
 LATEST_FILE = os.path.join(DATA_DIR, "territory-latest.csv")
 
-# --- SET YOUR HTML LOCATION HERE ---
-HTML_OUTPUT_PATH = "data/territory.html"
+HTML_OUTPUT_PATH = "/var/www/ogfstats/territory.html"
 
 os.makedirs(ADMIN_DIR, exist_ok=True)
 os.makedirs(STATS_DIR, exist_ok=True)
