@@ -11,10 +11,11 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "4.1"
+VERSION = "5.0"
 TARGET_DIR = Path("/var/www/ogfstats")
 
-VERSION_HISTORY = [
+VERSION_HISTORY = VERSION_HISTORY = [
+    {"v": "5.0", "date": "2026-03-25", "note": "More stats!!!!"},
     {"v": "4.1", "date": "2026-01-28", "note": "Fixed errors with slashes and commas in place names (stupid me thought that would not happen and I put it in a CSV)"},
     {"v": "4.0", "date": "2026-01-28", "note": "New Territory Stats tab. TStats updates daily with node, way, and relation counts for each claimed territory. Seperated all tabss into unique pages to make farther expansion easier."},
     {"v": "3.3", "date": "2026-01-26", "note": "Refined monthly reset logic to preserve chart history."},
@@ -23,6 +24,7 @@ VERSION_HISTORY = [
     {"v": "3.0", "date": "2026-01-26", "note": "Added Monthly Leaderboards, split webpage into tabs."},
     {"v": "2.0", "date": "2025-08-22", "note": "First documented version."}
 ]
+
 
 # --- SHARED COMPONENTS ---
 NAV_BAR = f"""
@@ -34,53 +36,53 @@ NAV_BAR = f"""
   </div>
 """
 
-# --- GOOGLE FUNCTIONALITY ---
 GOOGLE_BLOCK = """
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-7BV9Y2QVPZ"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
+  function gtag(){{dataLayer.push(arguments);}}
   gtag('js', new Date());
   gtag('config', 'G-7BV9Y2QVPZ');
 </script>
 """
 
-
 STYLE_BLOCK = """
   <style>
-    body { font-family: sans-serif; background: #fafafa; margin:0; padding:0; }
+    :root { --primary: #007bff; }
+    body { font-family: sans-serif; background: #fafafa; margin:0; padding:0; color: #1e293b; }
     .nav { background: #333; color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }
     .nav a { color: #ccc; text-decoration: none; font-weight: bold; padding: 5px 15px; border-radius: 4px; transition: 0.2s; }
     .nav a:hover { color: white; background: #444; }
-    .nav a.active { color: white; background: #007bff; }
-    .wrap { max-width: 1300px; margin: 24px auto; padding: 16px; background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
-    h1 { font-size: 22px; margin: 0 0 8px; }
+    .nav a.active { color: white; background: var(--primary); }
+    .wrap { max-width: 1500px; margin: 24px auto; padding: 16px; }
+    .card { background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
+    .card.full-width { grid-column: 1 / -1; }
+    h1 { font-size: 24px; margin: 0 0 16px; }
+    h2 { font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid var(--primary); display: inline-block; padding-bottom: 4px; margin-bottom: 15px; }
     .meta { color: #666; font-size: 14px; margin-bottom: 16px; }
-    .charts { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
-    #chart, #chartDiff { flex: 1; min-width: 400px; height: 500px; }
-    .btns { margin-bottom: 12px; }
-    button { padding: 6px 12px; border:1px solid #ddd; border-radius: 6px; background:#f5f5f5; cursor:pointer; }
-    button.active { background:#007bff; color:white; }
-    .leaderboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
-    .leaderboard-card { background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
-    .leaderboard-card h2 { font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid #007bff; display: inline-block; padding-bottom: 4px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 15px; }
+    .chart-container { width: 100%; height: 350px; }
+    .btns { margin-bottom: 12px; display: flex; gap: 8px; }
+    button { padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; background:#f5f5f5; cursor:pointer; font-size: 13px; }
+    button.active { background: var(--primary); color:white; border-color: var(--primary); }
     .table-container { border-radius: 12px; overflow: hidden; border: 1px solid #007bff33; margin-top: 10px; }
     table { width: 100%; border-collapse: collapse; }
     th { background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; transition: background 0.2s; }
-    th:hover { background: #0056b3; } /* Slightly darker blue on hover */
-    td { padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+    th:hover { background: #0056b3; }
+    td { padding: 10px; border-bottom: 1px solid #eee; font-size: 12px; }
     tr:hover { background: #f5f9ff; }
-    .version-item { border-bottom: 1px solid #eee; padding: 12px 0; }
-    .version-tag { background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
     .footer { text-align: center; color: #999; font-size: 12px; margin: 40px 0; }
+    .leaderboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
+    .leaderboard-card { background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
   </style>
 """
 
-# --- 1. INDEX.HTML (CHARTS) ---
+# --- 1. INDEX.HTML ---
 INDEX_HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" /><title>OGFStats - Charts</title>
+  <meta charset="UTF-8" /><title>OGFStats - Dashboard</title>
   {GOOGLE_BLOCK}
   {STYLE_BLOCK}
   <script src="https://code.highcharts.com/highcharts.js"></script>
@@ -88,35 +90,168 @@ INDEX_HTML = f"""<!DOCTYPE html>
 <body>
   {NAV_BAR}
   <div class="wrap">
-    <h1>Changeset Activity</h1>
-    <p class="meta" id="updateTime">Loading data...</p>
-    <div class="btns">
-      <button id="btnHourly" class="active" onclick="setMode('hourly')">Hourly</button>
-      <button id="btnDaily" onclick="setMode('daily')">Daily</button>
+    <h1>Mapping Activity</h1>
+    <p class="meta" id="updateTime">Loading...</p>
+
+    <div class="grid-2">
+        <div class="card">
+            <h2>Latest Changeset ID</h2>
+            <div id="chartID" class="chart-container"></div>
+        </div>
+        <div class="card">
+            <h2>Activity Volume</h2>
+            <div class="btns">
+                <button id="btnHourly" class="active" onclick="setMode('hourly')">Hourly</button>
+                <button id="btnDaily" onclick="setMode('daily')">Daily</button>
+            </div>
+            <div id="chartDiff" class="chart-container"></div>
+        </div>
+
+        <div class="card full-width">
+            <h2>Active Users (Activity Trends)</h2>
+            <div id="mapperChart" class="chart-container" style="height: 400px;"></div>
+        </div>
+
+        <div class="card">
+            <h2>Top Mappers This Month</h2>
+            <div class="btns">
+                <button id="btnBarObjs" class="active" onclick="setBarMetric('objects')">By Objects</button>
+                <button id="btnBarEdits" onclick="setBarMetric('count')">By Edits</button>
+            </div>
+            <div id="userBarChart" class="chart-container" style="height: 435px;"></div>
+        </div>
+        <div class="card">
+            <h2>User Activity Summary</h2>
+            <div class="table-container">
+                <table id="deltaTable">
+                    <thead>
+                        <tr>
+                            <th onclick="sortRows('deltaTable', 0)">Name</th>
+                            <th onclick="sortRows('deltaTable', 1)">Today (Objs)</th>
+                            <th onclick="sortRows('deltaTable', 2)">Week (Objs)</th>
+                            <th onclick="sortRows('deltaTable', 3)">Month (Objs)</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
     </div>
-    <div class="charts"><div id="chart"></div><div id="chartDiff"></div></div>
   </div>
   <div class="footer">OGFStats by minimapper :)</div>
+
   <script>
     document.getElementById('nav_charts').classList.add('active');
-    let mode = 'hourly'; let rawData = null;
+    let rawData = null;
+    let mode = 'hourly';
+    let barMetric = 'objects';
+    let sortDirections = {{}};
+
     function setMode(m) {{
         mode = m;
         document.getElementById('btnHourly').classList.toggle('active', m === 'hourly');
         document.getElementById('btnDaily').classList.toggle('active', m === 'daily');
-        updateCharts(rawData[mode]);
+        renderTrend();
     }}
-    function updateCharts(entries) {{
-        const series = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
+
+    function setBarMetric(m) {{
+        barMetric = m;
+        document.getElementById('btnBarObjs').classList.toggle('active', m === 'objects');
+        document.getElementById('btnBarEdits').classList.toggle('active', m === 'count');
+        renderBar();
+    }}
+
+    function renderTrend() {{
+        const entries = rawData[mode];
         const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
-        Highcharts.chart('chart', {{ chart: {{ zoomType: 'x' }}, title: {{ text: 'Changeset ID Trend' }}, xAxis: {{ type: 'datetime' }}, series: [{{ name: 'ID', data: series, color: '#007bff' }}], credits: {{ enabled: false }} }});
-        Highcharts.chart('chartDiff', {{ chart: {{ type: 'column', zoomType: 'x' }}, title: {{ text: 'Activity Volume' }}, xAxis: {{ type: 'datetime' }}, series: [{{ name: 'Count', data: diffSeries, color: '#007bff' }}], credits: {{ enabled: false }} }});
+        Highcharts.chart('chartDiff', {{
+            chart: {{ type: 'column', zoomType: 'x' }},
+            title: {{ text: 'Changesets', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            xAxis: {{ type: 'datetime', crosshair: true }},
+            yAxis: {{ title: {{ text: 'Count' }} }},
+            tooltip: {{ shared: true, intersect: false }},
+            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
+            series: [{{ name: 'Changesets', data: diffSeries, color: '#007bff' }}],
+            credits: {{ enabled: false }}
+        }});
+
+        const idSeries = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
+        Highcharts.chart('chartID', {{
+            chart: {{ type: 'line', zoomType: 'x' }},
+            title: {{ text: 'ID History', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            xAxis: {{ type: 'datetime', crosshair: true }},
+            yAxis: {{ title: {{ text: 'ID' }}, startOnTick: false, endOnTick: false }},
+            tooltip: {{ shared: true, intersect: false }},
+            plotOptions: {{ line: {{ stickyTracking: true }} }},
+            series: [{{ name: 'Latest ID', data: idSeries, color: '#007bff' }}],
+            credits: {{ enabled: false }}
+        }});
     }}
+
+    function renderBar() {{
+        let sorted = [...rawData.monthly_leaderboard].sort((a,b) => b[barMetric] - a[barMetric]).slice(0, 20);
+        Highcharts.chart('userBarChart', {{
+            chart: {{ type: 'column' }},
+            title: {{ text: 'User Ranking', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            xAxis: {{ categories: sorted.map(u => u.user), crosshair: true }},
+            yAxis: {{ title: {{ text: barMetric === 'count' ? 'Edits' : 'Objects' }} }},
+            tooltip: {{ shared: true, intersect: false }},
+            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
+            series: [{{ name: barMetric === 'count' ? 'Edits' : 'Objects Changed', data: sorted.map(u => u[barMetric]), color: '#007bff' }}],
+            credits: {{ enabled: false }}
+        }});
+    }}
+
+    function sortRows(tableId, colIndex) {{
+        const table = document.getElementById(tableId);
+        const tbody = table.tBodies[0];
+        const rows = Array.from(tbody.rows);
+        const sortKey = tableId + colIndex;
+        sortDirections[sortKey] = !sortDirections[sortKey];
+        const ascending = sortDirections[sortKey];
+        const sortedRows = rows.sort((a, b) => {{
+            const valA = a.cells[colIndex].innerText;
+            const valB = b.cells[colIndex].innerText;
+            const numA = parseFloat(valA);
+            const numB = parseFloat(valB);
+            if (!isNaN(numA) && !isNaN(numB)) return ascending ? numA - numB : numB - numA;
+            return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }});
+        tbody.append(...sortedRows);
+    }}
+
     async function load() {{
         const resp = await fetch('data.json', {{ cache: 'no-store' }});
         rawData = await resp.json();
         document.getElementById('updateTime').innerText = "Last Sync: " + rawData.last_month_update;
-        updateCharts(rawData[mode]);
+
+        const mapperDaily = (rawData.daily_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
+        const mapperWeekly = (rawData.weekly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
+        const mapperMonthly = (rawData.monthly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
+
+        Highcharts.chart('mapperChart', {{
+            chart: {{ type: 'line', zoomType: 'x' }},
+            title: {{ text: 'Unique Mappers (Rolling)', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            xAxis: {{ type: 'datetime', crosshair: true }},
+            yAxis: {{ title: {{ text: 'Unique Users' }} }},
+            tooltip: {{ shared: true, crosshair: true }},
+            series: [
+                {{ name: 'Daily Unique', data: mapperDaily, color: '#007bff' }},
+                {{ name: 'Weekly Unique', data: mapperWeekly, color: '#28a745', visible: false }},
+                {{ name: 'Monthly Unique', data: mapperMonthly, color: '#dc3545', visible: false }}
+            ],
+            credits: {{ enabled: false }}
+        }});
+
+        const tbody = document.querySelector("#deltaTable tbody");
+        // Sort by monthly objects descending by default
+        const sorted = [...rawData.monthly_leaderboard].sort((a,b) => b.objects - a.objects).slice(0, 15);
+        tbody.innerHTML = sorted.map(u =>
+            `<tr><td>${{u.user}}</td><td>${{u.d_today || 0}}</td><td>${{u.d_week || 0}}</td><td>${{u.objects}}</td></tr>`
+        ).join('');
+
+        renderTrend();
+        renderBar();
     }}
     load();
   </script>
@@ -129,23 +264,45 @@ LEADERBOARD_HTML = f"""<!DOCTYPE html>
   <meta charset="UTF-8" /><title>OGFStats - Leaderboards</title>
   {GOOGLE_BLOCK}
   {STYLE_BLOCK}
+  <script src="https://code.highcharts.com/highcharts.js"></script>
 </head>
 <body>
   {NAV_BAR}
   <div class="wrap">
-    <h1>Leaderboards</h1>
+    <h1>User Leaderboards</h1>
+
+    <div class="card full-width">
+        <h2>Objects Changed (Monthly Overview)</h2>
+        <div id="fullUserChart" class="chart-container" style="height: 400px;"></div>
+    </div>
+
     <div class="leaderboard-grid">
       <div class="leaderboard-card"><h2>Hourly</h2><div class="table-container"><table id="hourlyTable"><thead><tr><th onclick="sortRows('hourlyTable', 0)">User</th><th onclick="sortRows('hourlyTable', 1)">UID</th><th onclick="sortRows('hourlyTable', 2)">Edits</th><th onclick="sortRows('hourlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="leaderboard-card"><h2>Daily</h2><div class="table-container"><table id="dailyTable"><thead><tr><th onclick="sortRows('dailyTable', 0)">User</th><th onclick="sortRows('dailyTable', 1)">UID</th><th onclick="sortRows('dailyTable', 2)">Edits</th><th onclick="sortRows('dailyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
+      <div class="leaderboard-card"><h2>Daily (Rolling 24h)</h2><div class="table-container"><table id="dailyTable"><thead><tr><th onclick="sortRows('dailyTable', 0)">User</th><th onclick="sortRows('dailyTable', 1)">UID</th><th onclick="sortRows('dailyTable', 2)">Edits</th><th onclick="sortRows('dailyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
       <div class="leaderboard-card"><h2>Monthly</h2><div class="table-container"><table id="monthlyTable"><thead><tr><th onclick="sortRows('monthlyTable', 0)">User</th><th onclick="sortRows('monthlyTable', 1)">UID</th><th onclick="sortRows('monthlyTable', 2)">Edits</th><th onclick="sortRows('monthlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
     </div>
   </div>
+
   <script>
     document.getElementById('nav_leaderboards').classList.add('active');
-
     let sortDirections = {{}};
 
+    function renderFullChart(users) {{
+        const sorted = [...users].sort((a,b) => b.objects - a.objects);
+        Highcharts.chart('fullUserChart', {{
+            chart: {{ type: 'column' }},
+            title: {{ text: 'Full Distribution (Linear)', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            xAxis: {{ categories: sorted.map(u => u.user), labels: {{ enabled: false }}, crosshair: true }},
+            yAxis: {{ title: {{ text: 'Objects Changed' }} }},
+            tooltip: {{ shared: true, intersect: false }},
+            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
+            series: [{{ name: 'Objects', data: sorted.map(u => u.objects), color: '#007bff' }}],
+            credits: {{ enabled: false }}
+        }});
+    }}
+
     function fillTable(id, list) {{
+        if (!list) return;
         document.querySelector(`#${{id}} tbody`).innerHTML = list.map(u => `<tr><td>${{u.user}}</td><td>${{u.uid}}</td><td>${{u.count}}</td><td>${{u.objects}}</td></tr>`).join('');
     }}
 
@@ -153,35 +310,24 @@ LEADERBOARD_HTML = f"""<!DOCTYPE html>
         const table = document.getElementById(tableId);
         const tbody = table.tBodies[0];
         const rows = Array.from(tbody.rows);
-
-        // Track sort direction for this specific table and column
         const sortKey = tableId + colIndex;
         sortDirections[sortKey] = !sortDirections[sortKey];
         const ascending = sortDirections[sortKey];
-
         const sortedRows = rows.sort((a, b) => {{
             const valA = a.cells[colIndex].innerText;
             const valB = b.cells[colIndex].innerText;
-
-            // Check if we are sorting numbers or strings
             const numA = parseFloat(valA);
             const numB = parseFloat(valB);
-
-            if (!isNaN(numA) && !isNaN(numB)) {{
-                return ascending ? numA - numB : numB - numA;
-            }} else {{
-                return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-            }}
+            if (!isNaN(numA) && !isNaN(numB)) return ascending ? numA - numB : numB - numA;
+            return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
         }});
-
-        // Re-append rows to the tbody
-        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
         tbody.append(...sortedRows);
     }}
 
     async function load() {{
         const resp = await fetch('data.json', {{ cache: 'no-store' }});
         const data = await resp.json();
+        renderFullChart(data.monthly_leaderboard || []);
         fillTable('hourlyTable', data.hourly_leaderboards?.slice(-1)[0]?.leaderboard || []);
         fillTable('dailyTable', data.daily_leaderboard || []);
         fillTable('monthlyTable', data.monthly_leaderboard || []);
@@ -197,23 +343,33 @@ VERSION_HTML = f"""<!DOCTYPE html>
 <body>
   {NAV_BAR}
   <div class="wrap">
-    <h1>Version History</h1>
-    <div id="versionList"></div>
+    <div class="card">
+        <h1>Version History</h1>
+        <div id="versionList"></div>
+    </div>
   </div>
   <script>
     document.getElementById('nav_version').classList.add('active');
     const historyData = {json.dumps(VERSION_HISTORY)};
     document.getElementById('versionList').innerHTML = historyData.map(v => `
-        <div class="version-item">
-            <span class="version-tag">v${{v.v}}</span> <strong>${{v.date}}</strong>
+        <div style="border-bottom: 1px solid #eee; padding: 12px 0;">
+            <span style="background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">v${{v.v}}</span>
+            <strong>${{v.date}}</strong>
             <p style="margin: 8px 0 0; font-size: 14px; color: #444;">${{v.note}}</p>
         </div>
     `).join('');
   </script>
 </body></html>"""
 
+# --- PYTHON LOGIC ---
+
 def get_initial_data():
-    return {"hourly": [], "daily": [], "hourly_leaderboards": [], "rolling24": [], "monthly_store": [], "monthly_leaderboard": [], "last_month_update": "", "seen_ids": []}
+    return {
+        "hourly": [], "daily": [], "hourly_leaderboards": [],
+        "rolling24": [], "monthly_store": [], "monthly_leaderboard": [],
+        "last_month_update": "", "seen_ids": [],
+        "daily_mapper_counts": [], "weekly_mapper_counts": [], "monthly_mapper_counts": []
+    }
 
 def fetch_recent_changesets(lookback_hours=2):
     start_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
@@ -222,7 +378,14 @@ def fetch_recent_changesets(lookback_hours=2):
     try:
         with urlopen(req, timeout=20) as resp:
             root = ET.fromstring(resp.read())
-        return [{"id": cs.get("id"), "user": cs.get("user"), "uid": cs.get("uid"), "changes_count": int(cs.get("changes_count", "0"))} for cs in root.findall("changeset")]
+        # Store timestamp of changeset for filtering later
+        return [{
+            "id": cs.get("id"),
+            "user": cs.get("user"),
+            "uid": cs.get("uid"),
+            "changes_count": int(cs.get("changes_count", "0")),
+            "ts": cs.get("created_at")
+        } for cs in root.findall("changeset")]
     except Exception as e:
         print(f"Fetch error: {e}"); return []
 
@@ -235,116 +398,83 @@ def tally_users(entries):
     return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]} for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
 
 def run_update(data_file, now):
-    # Load existing data or start fresh
+    # 1. Load data
     data = get_initial_data()
     if data_file.exists():
-        try:
-            data = json.loads(data_file.read_text(encoding="utf-8"))
-        except:
-            pass
+        try: data = json.loads(data_file.read_text(encoding="utf-8"))
+        except: pass
 
-    # 1. ARCHIVING (End of month logic)
-    current_month = now.strftime("%Y-%m")
-    last_update = data.get("last_month_update", "")
-    if last_update and current_month != last_update[:7]:
-        archive_dir = data_file.parent / "monthly_archives"
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        (archive_dir / f"{last_update[:7]}.json").write_text(json.dumps(data, indent=2))
-        # Reset monthly counters
-        data["monthly_store"], data["monthly_leaderboard"] = [], []
-
-    # 2. FETCHING NEW DATA
+    # 2. Fetch and Track Changesets
     raw_entries = fetch_recent_changesets()
     seen = set(data.get("seen_ids", []))
     new_entries = [e for e in raw_entries if e["id"] not in seen]
-    for e in new_entries:
-        seen.add(e["id"])
-    data["seen_ids"] = list(seen)[-2000:]
+    for e in new_entries: seen.add(e["id"])
+    data["seen_ids"] = list(seen)[-3000:]
 
-    # 3. BUCKETING LOGIC
     bucket_ts = now.replace(minute=0, second=0, microsecond=0)
     ts_str = bucket_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
     data["last_month_update"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Determine latest Changeset ID
-    if raw_entries:
-        cid = int(raw_entries[0]["id"])
-    elif data["hourly"]:
-        cid = data["hourly"][-1]["changeset_id"]
-    else:
-        cid = 0
+    cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
 
-    # Hourly Updates
+    # 3. Hourly Bucketing (Charts)
     existing_hourly = next((item for item in data["hourly"] if item["timestamp"] == ts_str), None)
     if existing_hourly:
         existing_hourly["change"] += len(new_entries)
         existing_hourly["changeset_id"] = cid
     else:
         data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
-        data["hourly"] = data["hourly"][-720:] # Keep 30 days of hourly data
+        data["hourly"] = data["hourly"][-720:]
 
-    # 4. DAILY TASK (ts.py)
-    last_dc = data.get("last_dc_run", "")
-    today_str = now.strftime("%Y-%m-%d")
-    if last_dc != today_str:
-        print(f"[{now.strftime('%H:%M:%S')}] Launching daily territory scan (ts.py)...")
-        try:
-            # Runs your territory script as a separate process
-            subprocess.run([sys.executable, "ts.py"], check=True)
-            data["last_dc_run"] = today_str
-        except Exception as e:
-            print(f"Error running ts.py: {e}")
+    # 4. Update the storage and prune old months
+    data.setdefault("monthly_store", []).extend(new_entries)
+    this_month = now.strftime("%Y-%m")
+    data["monthly_store"] = [e for e in data["monthly_store"] if "ts" in e and e["ts"].startswith(this_month)]
 
-    # 5. LEADERBOARDS
-    # Hourly Leaderboard (Last hour only)
+    # 5. Calculate Rolling Windows
+    day_ago = (now - timedelta(days=1)).isoformat()
+    week_ago = (now - timedelta(days=7)).isoformat()
+
+    today_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= day_ago])
+    week_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= week_ago])
+    full_month = tally_users(data["monthly_store"])
+
+    # 6. --- NEW: RECORD HISTORY FOR THE ACTIVE USERS CHART ---
+    # This records the COUNT of unique users at this specific hour
+    data.setdefault("daily_mapper_counts", []).append({"date": ts_str, "count": len(today_list)})
+    data.setdefault("weekly_mapper_counts", []).append({"date": ts_str, "count": len(week_list)})
+    data.setdefault("monthly_mapper_counts", []).append({"date": ts_str, "count": len(full_month)})
+
+    # Keep ~1 month of hourly history (720 hours)
+    data["daily_mapper_counts"] = data["daily_mapper_counts"][-720:]
+    data["weekly_mapper_counts"] = data["weekly_mapper_counts"][-720:]
+    data["monthly_mapper_counts"] = data["monthly_mapper_counts"][-720:]
+
+    # 7. Build Leaderboards
+    for u in full_month:
+        u["d_today"] = next((x["objects"] for x in today_list if x["uid"] == u["uid"]), 0)
+        u["d_week"] = next((x["objects"] for x in week_list if x["uid"] == u["uid"]), 0)
+
+    data["monthly_leaderboard"] = full_month
+    data["daily_leaderboard"] = today_list
+
+    # Save hourly snapshot for the table
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
 
-    # Daily Leaderboard (Rolling 24h)
-    data.setdefault("rolling24", []).append({"timestamp": ts_str, "entries": new_entries})
-    cutoff = now - timedelta(hours=24)
-    data["rolling24"] = [r for r in data["rolling24"] if datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")).replace(tzinfo=timezone.utc) >= cutoff]
-    data["daily_leaderboard"] = tally_users([e for r in data["rolling24"] for e in r["entries"]])
-
-    # Monthly Leaderboard
-    data.setdefault("monthly_store", []).extend(new_entries)
-    data["monthly_leaderboard"] = tally_users(data["monthly_store"])
-
-    # 6. SAVE
+    # 8. Final Save
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print(f"[{now.strftime('%H:%M:%S')}] Success: {cid} (+{len(new_entries)} new) bucketed to {ts_str}")
 
 def main():
-    # Ensure the web directory exists
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Define the files to be created
-    pages = {
-        "index.html": INDEX_HTML,
-        "leaderboards.html": LEADERBOARD_HTML,
-        "version.html": VERSION_HTML
-    }
-
-    # Write the HTML files
-    for filename, content in pages.items():
-        (TARGET_DIR / filename).write_text(content, encoding='utf-8')
-        print(f"Initialized {filename}")
+    pages = {"index.html": INDEX_HTML, "leaderboards.html": LEADERBOARD_HTML, "version.html": VERSION_HTML}
+    for f, c in pages.items(): (TARGET_DIR / f).write_text(c, encoding='utf-8')
 
     data_file = TARGET_DIR / "data.json"
-
-    # Run the first update immediately
     run_update(data_file, datetime.now(timezone.utc))
 
-    # The Infinite Loop (runs once per hour)
     while True:
-        now = datetime.now(timezone.utc)
-        # Calculate time until the next top-of-the-hour + 5 seconds
-        next_run = (now + timedelta(hours=1)).replace(minute=0, second=5, microsecond=0)
-        sleep_time = (next_run - now).total_seconds()
-
-        print(f"Waiting {int(sleep_time)}s until next hourly sync...")
-        time.sleep(sleep_time)
-
+        time.sleep(3600)
         run_update(data_file, datetime.now(timezone.utc))
 
 if __name__ == "__main__":
