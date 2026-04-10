@@ -15,12 +15,13 @@ ADMIN_DIR = os.path.join(DATA_DIR, "territory-admin")
 STATS_DIR = os.path.join(DATA_DIR, "territory")
 LATEST_FILE = os.path.join(DATA_DIR, "territory-latest.csv")
 
-HTML_OUTPUT_PATH = "/var/www/ogfstats/territory.html"
+HTML_OUTPUT_PATH = "/home/minimapper/Desktop/projects/ogfstats/v5/site/territory.html"
 
 os.makedirs(ADMIN_DIR, exist_ok=True)
 os.makedirs(STATS_DIR, exist_ok=True)
 
 ADMIN_JSON = os.path.join(ADMIN_DIR, "territory_admin.json")
+WEEK_IN_SECONDS = 604800  # 7 days * 24h * 60m * 60s
 
 # ================= HTML TEMPLATE =================
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -147,7 +148,7 @@ async function toggleTerritory(name, rel, state) {
                                  .replace(/\\//g, "-")
                                  .replace(/\\\\/g, "-")
                                  .replace(/ /g, "_");
-            
+
             const file = `tdata/territory/${safeName}_${rel}.csv`;
             try {
                 const rows = await loadCSV(file);
@@ -231,12 +232,30 @@ buildDashboard();
 # ================= HELPERS =================
 
 def fetch_admin_json():
-    if os.path.exists(ADMIN_JSON):
-        return
-    r = requests.get(TERRITORY_URL, timeout=60)
-    r.raise_for_status()
-    with open(ADMIN_JSON, "w", encoding="utf-8") as f:
-        f.write(r.text)
+    """Downloads the territory admin file if missing or older than 1 week."""
+    should_download = False
+
+    if not os.path.exists(ADMIN_JSON):
+        print("Admin JSON missing. Downloading...")
+        should_download = True
+    else:
+        # Check file age
+        file_age = time.time() - os.path.getmtime(ADMIN_JSON)
+        if file_age > WEEK_IN_SECONDS:
+            print("Admin JSON is over a week old. Updating...")
+            should_download = True
+
+    if should_download:
+        try:
+            r = requests.get(TERRITORY_URL, timeout=60)
+            r.raise_for_status()
+            with open(ADMIN_JSON, "w", encoding="utf-8") as f:
+                f.write(r.text)
+            print("✓ Admin JSON updated successfully.")
+        except Exception as e:
+            print(f"❌ Failed to update Admin JSON: {e}")
+            if not os.path.exists(ADMIN_JSON):
+                raise # Exit if we don't even have a stale version to fall back on
 
 def load_owned_territories():
     with open(ADMIN_JSON, encoding="utf-8") as f:
@@ -252,11 +271,11 @@ def run_overpass(rel_id):
 def parse_overpass(data):
     counts = next(el["tags"] for el in data["elements"] if el["type"] == "count")
     name = next((el.get("tags", {}).get("name", "unknown") for el in data["elements"] if el["type"] == "relation"), "unknown")
-    
+
     # SCRUBBING: Remove commas and hidden line breaks for CSV safety
     name = name.replace('\n', ' ').replace('\r', ' ').replace(',', '').strip()
     name = " ".join(name.split())
-    
+
     return name, {k: int(counts[k]) for k in ["nodes", "ways", "relations", "areas", "total"]}
 
 # ================= MAIN =================
@@ -285,13 +304,13 @@ def main():
 
         # FILENAME SAFETY: remove commas, turn slashes to dashes
         safe_name = name.replace(",", "").replace("/", "-").replace("\\", "-").replace(" ", "_")
-        
+
         # 1. Append to History
         hist_path = os.path.join(STATS_DIR, f"{safe_name}_{rel_id}.csv")
         write_h = not os.path.exists(hist_path)
         with open(hist_path, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
-            if write_h: 
+            if write_h:
                 writer.writerow(["timestamp", "nodes", "ways", "relations", "areas", "total"])
             writer.writerow([timestamp, stats["nodes"], stats["ways"], stats["relations"], stats["areas"], stats["total"]])
 
