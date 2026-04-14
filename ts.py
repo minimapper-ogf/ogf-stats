@@ -15,7 +15,7 @@ ADMIN_DIR = os.path.join(DATA_DIR, "territory-admin")
 STATS_DIR = os.path.join(DATA_DIR, "territory")
 LATEST_FILE = os.path.join(DATA_DIR, "territory-latest.csv")
 
-HTML_OUTPUT_PATH = "/home/minimapper/Desktop/projects/ogfstats/v5/site/territory.html"
+HTML_OUTPUT_PATH = "/var/www/ogfstats/territory.html"
 
 os.makedirs(ADMIN_DIR, exist_ok=True)
 os.makedirs(STATS_DIR, exist_ok=True)
