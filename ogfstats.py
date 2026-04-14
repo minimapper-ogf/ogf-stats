@@ -474,8 +474,13 @@ def main():
     run_update(data_file, datetime.now(timezone.utc))
 
     while True:
-        time.sleep(3600)
-        run_update(data_file, datetime.now(timezone.utc))
+            try:
+                run_update(data_file, datetime.now(timezone.utc))
+            except Exception as e:
+                print(f"Loop error: {e}")
+            
+            print("Waiting 3600s...")
+            time.sleep(3600)
 
 if __name__ == "__main__":
     main()
