@@ -398,24 +398,37 @@ def tally_users(entries):
     return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]} for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
 
 def run_update(data_file, now):
-    # 1. Load data
+    # 1. Load data and ENSURE we don't overwrite with empty defaults
     data = get_initial_data()
     if data_file.exists():
-        try: data = json.loads(data_file.read_text(encoding="utf-8"))
-        except: pass
+        try:
+            loaded_data = json.loads(data_file.read_text(encoding="utf-8"))
+            # Merge loaded data into our working dictionary
+            data.update(loaded_data)
+        except Exception as e:
+            print(f"Warning: Could not load existing data: {e}")
 
     # 2. Fetch and Track Changesets
     raw_entries = fetch_recent_changesets()
     seen = set(data.get("seen_ids", []))
     new_entries = [e for e in raw_entries if e["id"] not in seen]
-    for e in new_entries: seen.add(e["id"])
-    data["seen_ids"] = list(seen)[-3000:]
+    for e in new_entries: 
+        seen.add(e["id"])
+    
+    # Prune seen IDs but keep enough to avoid duplicates
+    data["seen_ids"] = list(seen)[-5000:]
 
     bucket_ts = now.replace(minute=0, second=0, microsecond=0)
     ts_str = bucket_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
     data["last_month_update"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
+    # Get latest ID for the chart
+    if raw_entries:
+        cid = int(raw_entries[0]["id"])
+    elif data["hourly"]:
+        cid = data["hourly"][-1]["changeset_id"]
+    else:
+        cid = 0
 
     # 3. Hourly Bucketing (Charts)
     existing_hourly = next((item for item in data["hourly"] if item["timestamp"] == ts_str), None)
@@ -426,10 +439,13 @@ def run_update(data_file, now):
         data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
         data["hourly"] = data["hourly"][-720:]
 
-    # 4. Update the storage and prune old months
+    # 4. --- THE FIX FOR THE LEADERBOARD ---
+    # Append new entries to the existing store instead of replacing it
     data.setdefault("monthly_store", []).extend(new_entries)
+    
+    # Only prune entries that are NOT from the current month
     this_month = now.strftime("%Y-%m")
-    data["monthly_store"] = [e for e in data["monthly_store"] if "ts" in e and e["ts"].startswith(this_month)]
+    data["monthly_store"] = [e for e in data["monthly_store"] if e.get("ts", "").startswith(this_month)]
 
     # 5. Calculate Rolling Windows
     day_ago = (now - timedelta(days=1)).isoformat()
@@ -439,18 +455,16 @@ def run_update(data_file, now):
     week_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= week_ago])
     full_month = tally_users(data["monthly_store"])
 
-    # 6. --- NEW: RECORD HISTORY FOR THE ACTIVE USERS CHART ---
-    # This records the COUNT of unique users at this specific hour
+    # 6. Record history for unique mapper charts
     data.setdefault("daily_mapper_counts", []).append({"date": ts_str, "count": len(today_list)})
     data.setdefault("weekly_mapper_counts", []).append({"date": ts_str, "count": len(week_list)})
     data.setdefault("monthly_mapper_counts", []).append({"date": ts_str, "count": len(full_month)})
 
-    # Keep ~1 month of hourly history (720 hours)
     data["daily_mapper_counts"] = data["daily_mapper_counts"][-720:]
     data["weekly_mapper_counts"] = data["weekly_mapper_counts"][-720:]
     data["monthly_mapper_counts"] = data["monthly_mapper_counts"][-720:]
 
-    # 7. Build Leaderboards
+    # 7. Update Leaderboards
     for u in full_month:
         u["d_today"] = next((x["objects"] for x in today_list if x["uid"] == u["uid"]), 0)
         u["d_week"] = next((x["objects"] for x in week_list if x["uid"] == u["uid"]), 0)
@@ -458,7 +472,7 @@ def run_update(data_file, now):
     data["monthly_leaderboard"] = full_month
     data["daily_leaderboard"] = today_list
 
-    # Save hourly snapshot for the table
+    # Hourly snapshot table
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
 
@@ -466,21 +480,62 @@ def run_update(data_file, now):
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 def main():
+    # 1. Initialization and Page Writing
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
     pages = {"index.html": INDEX_HTML, "leaderboards.html": LEADERBOARD_HTML, "version.html": VERSION_HTML}
-    for f, c in pages.items(): (TARGET_DIR / f).write_text(c, encoding='utf-8')
+    for f, c in pages.items(): 
+        (TARGET_DIR / f).write_text(c, encoding='utf-8')
 
     data_file = TARGET_DIR / "data.json"
-    run_update(data_file, datetime.now(timezone.utc))
+    
+    # Track the last day ts.py was run to prevent multiple runs if script restarts at 12:05 AM
+    last_ts_run_day = None
+
+    # Load existing data immediately to populate last_ts_run_day if possible
+    if data_file.exists():
+        try:
+            temp_data = json.loads(data_file.read_text(encoding="utf-8"))
+            if "last_month_update" in temp_data:
+                # Extracts YYYY-MM-DD from the timestamp
+                last_ts_run_day = temp_data["last_month_update"].split('T')[0]
+        except:
+            pass
+
+    print(f"Starting OGFStats v{VERSION}...")
 
     while True:
-            try:
-                run_update(data_file, datetime.now(timezone.utc))
-            except Exception as e:
-                print(f"Loop error: {e}")
+        try:
+            now = datetime.now(timezone.utc)
             
-            print("Waiting 3600s...")
-            time.sleep(3600)
+            # 2. Main Changeset Update (Preserves monthly_store internally)
+            run_update(data_file, now)
+            
+            # 3. Daily Task: Run Territory Stats (ts.py) at 12 AM
+            current_day = now.strftime("%Y-%m-%d")
+            # If it is the 00:00 hour and we haven't run it today yet
+            if now.hour == 0 and last_ts_run_day != current_day:
+                print(f"Midnight detected ({current_day} 00:00). Running ts.py...")
+                try:
+                    # Runs ts.py and waits for it to finish
+                    subprocess.run([sys.executable, "ts.py"], check=True)
+                    last_ts_run_day = current_day
+                    print("✓ ts.py completed successfully.")
+                except Exception as e:
+                    print(f"❌ Error running ts.py: {e}")
+
+        except Exception as e:
+            print(f"Critical Loop error: {e}")
+
+        # 4. Precision Sleep (Prevents Timing Drift)
+        # Calculate seconds until the exact start of the next hour
+        now = datetime.now(timezone.utc)
+        seconds_until_next_hour = 3600 - (now.minute * 60 + now.second) + 5 # 5s buffer for server clock
+        
+        print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {seconds_until_next_hour}s...")
+        time.sleep(max(0, seconds_until_next_hour))
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
