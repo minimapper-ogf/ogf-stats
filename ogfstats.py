@@ -11,10 +11,11 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "5.0"
+VERSION = "5.1"
 TARGET_DIR = Path("/var/www/ogfstats")
 
-VERSION_HISTORY = VERSION_HISTORY = [
+VERSION_HISTORY = [
+    {"v": "5.1", "date": "2026-06-15", "note": "Added automatic system dark/light theme support across the entire site."},
     {"v": "5.0", "date": "2026-03-25", "note": "More stats!!!!"},
     {"v": "4.1", "date": "2026-01-28", "note": "Fixed errors with slashes and commas in place names (stupid me thought that would not happen and I put it in a CSV)"},
     {"v": "4.0", "date": "2026-01-28", "note": "New Territory Stats tab. TStats updates daily with node, way, and relation counts for each claimed territory. Seperated all tabss into unique pages to make farther expansion easier."},
@@ -48,33 +49,59 @@ GOOGLE_BLOCK = """
 
 STYLE_BLOCK = """
   <style>
-    :root { --primary: #007bff; }
-    body { font-family: sans-serif; background: #fafafa; margin:0; padding:0; color: #1e293b; }
+    /* Default Light Theme Variables */
+    :root {
+      --primary: #007bff;
+      --bg-body: #fafafa;
+      --bg-card: #ffffff;
+      --text-main: #1e293b;
+      --text-muted: #666666;
+      --border-color: #eeeeee;
+      --table-hover: #f5f9ff;
+      --btn-bg: #f5f5f5;
+      --btn-border: #dddddd;
+    }
+
+    /* Automatic Dark Theme Overrides */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-body: #121212;
+        --bg-card: #1e1e1e;
+        --text-main: #f1f5f9;
+        --text-muted: #94a3b8;
+        --border-color: #2e2e2e;
+        --table-hover: #252526;
+        --btn-bg: #2d2d2d;
+        --btn-border: #444444;
+      }
+    }
+
+    body { font-family: sans-serif; background: var(--bg-body); margin:0; padding:0; color: var(--text-main); transition: background 0.3s, color 0.3s; }
     .nav { background: #333; color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }
     .nav a { color: #ccc; text-decoration: none; font-weight: bold; padding: 5px 15px; border-radius: 4px; transition: 0.2s; }
     .nav a:hover { color: white; background: #444; }
     .nav a.active { color: white; background: var(--primary); }
     .wrap { max-width: 1500px; margin: 24px auto; padding: 16px; }
-    .card { background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
+    .card { background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
     .card.full-width { grid-column: 1 / -1; }
     h1 { font-size: 24px; margin: 0 0 16px; }
-    h2 { font-size: 18px; margin-top: 0; color: #333; border-bottom: 2px solid var(--primary); display: inline-block; padding-bottom: 4px; margin-bottom: 15px; }
-    .meta { color: #666; font-size: 14px; margin-bottom: 16px; }
+    h2 { font-size: 18px; margin-top: 0; color: var(--text-main); border-bottom: 2px solid var(--primary); display: inline-block; padding-bottom: 4px; margin-bottom: 15px; }
+    .meta { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
     .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 20px; }
     .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 15px; }
     .chart-container { width: 100%; height: 350px; }
     .btns { margin-bottom: 12px; display: flex; gap: 8px; }
-    button { padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; background:#f5f5f5; cursor:pointer; font-size: 13px; }
+    button { padding: 6px 12px; border: 1px solid var(--btn-border); border-radius: 6px; background: var(--btn-bg); color: var(--text-main); cursor:pointer; font-size: 13px; }
     button.active { background: var(--primary); color:white; border-color: var(--primary); }
     .table-container { border-radius: 12px; overflow: hidden; border: 1px solid #007bff33; margin-top: 10px; }
     table { width: 100%; border-collapse: collapse; }
     th { background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; transition: background 0.2s; }
     th:hover { background: #0056b3; }
-    td { padding: 10px; border-bottom: 1px solid #eee; font-size: 12px; }
-    tr:hover { background: #f5f9ff; }
-    .footer { text-align: center; color: #999; font-size: 12px; margin: 40px 0; }
+    td { padding: 10px; border-bottom: 1px solid var(--border-color); font-size: 12px; color: var(--text-main); }
+    tr:hover { background: var(--table-hover); }
+    .footer { text-align: center; color: var(--text-muted); font-size: 12px; margin: 40px 0; }
     .leaderboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
-    .leaderboard-card { background: #fff; border-radius: 16px; border: 1px solid #eee; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
+    .leaderboard-card { background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border-color); padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
   </style>
 """
 
@@ -147,6 +174,11 @@ INDEX_HTML = f"""<!DOCTYPE html>
     let barMetric = 'objects';
     let sortDirections = {{}};
 
+    // Let Highcharts adjust text colors and elements naturally
+    Highcharts.setOptions({{
+        chart: {{ backgroundColor: 'transparent' }}
+    }});
+
     function setMode(m) {{
         mode = m;
         document.getElementById('btnHourly').classList.toggle('active', m === 'hourly');
@@ -166,7 +198,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
         const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
         Highcharts.chart('chartDiff', {{
             chart: {{ type: 'column', zoomType: 'x' }},
-            title: {{ text: 'Changesets', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            title: {{ text: 'Changesets', align: 'left', style: {{ fontWeight: 'bold' }} }},
             xAxis: {{ type: 'datetime', crosshair: true }},
             yAxis: {{ title: {{ text: 'Count' }} }},
             tooltip: {{ shared: true, intersect: false }},
@@ -178,7 +210,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
         const idSeries = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
         Highcharts.chart('chartID', {{
             chart: {{ type: 'line', zoomType: 'x' }},
-            title: {{ text: 'ID History', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            title: {{ text: 'ID History', align: 'left', style: {{ fontWeight: 'bold' }} }},
             xAxis: {{ type: 'datetime', crosshair: true }},
             yAxis: {{ title: {{ text: 'ID' }}, startOnTick: false, endOnTick: false }},
             tooltip: {{ shared: true, intersect: false }},
@@ -192,7 +224,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
         let sorted = [...rawData.monthly_leaderboard].sort((a,b) => b[barMetric] - a[barMetric]).slice(0, 20);
         Highcharts.chart('userBarChart', {{
             chart: {{ type: 'column' }},
-            title: {{ text: 'User Ranking', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            title: {{ text: 'User Ranking', align: 'left', style: {{ fontWeight: 'bold' }} }},
             xAxis: {{ categories: sorted.map(u => u.user), crosshair: true }},
             yAxis: {{ title: {{ text: barMetric === 'count' ? 'Edits' : 'Objects' }} }},
             tooltip: {{ shared: true, intersect: false }},
@@ -231,7 +263,7 @@ INDEX_HTML = f"""<!DOCTYPE html>
 
         Highcharts.chart('mapperChart', {{
             chart: {{ type: 'line', zoomType: 'x' }},
-            title: {{ text: 'Unique Mappers (Rolling)', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            title: {{ text: 'Unique Mappers (Rolling)', align: 'left', style: {{ fontWeight: 'bold' }} }},
             xAxis: {{ type: 'datetime', crosshair: true }},
             yAxis: {{ title: {{ text: 'Unique Users' }} }},
             tooltip: {{ shared: true, crosshair: true }},
@@ -244,7 +276,6 @@ INDEX_HTML = f"""<!DOCTYPE html>
         }});
 
         const tbody = document.querySelector("#deltaTable tbody");
-        // Sort by monthly objects descending by default
         const sorted = [...rawData.monthly_leaderboard].sort((a,b) => b.objects - a.objects).slice(0, 15);
         tbody.innerHTML = sorted.map(u =>
             `<tr><td>${{u.user}}</td><td>${{u.d_today || 0}}</td><td>${{u.d_week || 0}}</td><td>${{u.objects}}</td></tr>`
@@ -287,11 +318,15 @@ LEADERBOARD_HTML = f"""<!DOCTYPE html>
     document.getElementById('nav_leaderboards').classList.add('active');
     let sortDirections = {{}};
 
+    Highcharts.setOptions({{
+        chart: {{ backgroundColor: 'transparent' }}
+    }});
+
     function renderFullChart(users) {{
         const sorted = [...users].sort((a,b) => b.objects - a.objects);
         Highcharts.chart('fullUserChart', {{
             chart: {{ type: 'column' }},
-            title: {{ text: 'Full Distribution (Linear)', align: 'left', style: {{ color: '#333', fontWeight: 'bold' }} }},
+            title: {{ text: 'Full Distribution (Linear)', align: 'left', style: {{ fontWeight: 'bold' }} }},
             xAxis: {{ categories: sorted.map(u => u.user), labels: {{ enabled: false }}, crosshair: true }},
             yAxis: {{ title: {{ text: 'Objects Changed' }} }},
             tooltip: {{ shared: true, intersect: false }},
@@ -352,10 +387,10 @@ VERSION_HTML = f"""<!DOCTYPE html>
     document.getElementById('nav_version').classList.add('active');
     const historyData = {json.dumps(VERSION_HISTORY)};
     document.getElementById('versionList').innerHTML = historyData.map(v => `
-        <div style="border-bottom: 1px solid #eee; padding: 12px 0;">
-            <span style="background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">v${{v.v}}</span>
-            <strong>${{v.date}}</strong>
-            <p style="margin: 8px 0 0; font-size: 14px; color: #444;">${{v.note}}</p>
+        <div style="border-bottom: 1px solid var(--border-color); padding: 12px 0;">
+            <span style="background: var(--btn-bg); color: var(--text-main); padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">v\${{v.v}}</span>
+            <strong>\Technical terms match standard styling: \${{v.date}}</strong>
+            <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-muted);">\${{v.note}}</p>
         </div>
     `).join('');
   </script>
@@ -378,7 +413,6 @@ def fetch_recent_changesets(lookback_hours=2):
     try:
         with urlopen(req, timeout=20) as resp:
             root = ET.fromstring(resp.read())
-        # Store timestamp of changeset for filtering later
         return [{
             "id": cs.get("id"),
             "user": cs.get("user"),
@@ -398,39 +432,23 @@ def tally_users(entries):
     return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]} for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
 
 def run_update(data_file, now):
-    # 1. Load data and ENSURE we don't overwrite with empty defaults
     data = get_initial_data()
     if data_file.exists():
-        try:
-            loaded_data = json.loads(data_file.read_text(encoding="utf-8"))
-            # Merge loaded data into our working dictionary
-            data.update(loaded_data)
-        except Exception as e:
-            print(f"Warning: Could not load existing data: {e}")
+        try: data = json.loads(data_file.read_text(encoding="utf-8"))
+        except: pass
 
-    # 2. Fetch and Track Changesets
     raw_entries = fetch_recent_changesets()
     seen = set(data.get("seen_ids", []))
     new_entries = [e for e in raw_entries if e["id"] not in seen]
-    for e in new_entries: 
-        seen.add(e["id"])
-    
-    # Prune seen IDs but keep enough to avoid duplicates
-    data["seen_ids"] = list(seen)[-5000:]
+    for e in new_entries: seen.add(e["id"])
+    data["seen_ids"] = list(seen)[-3000:]
 
     bucket_ts = now.replace(minute=0, second=0, microsecond=0)
     ts_str = bucket_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
     data["last_month_update"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Get latest ID for the chart
-    if raw_entries:
-        cid = int(raw_entries[0]["id"])
-    elif data["hourly"]:
-        cid = data["hourly"][-1]["changeset_id"]
-    else:
-        cid = 0
+    cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
 
-    # 3. Hourly Bucketing (Charts)
     existing_hourly = next((item for item in data["hourly"] if item["timestamp"] == ts_str), None)
     if existing_hourly:
         existing_hourly["change"] += len(new_entries)
@@ -439,15 +457,10 @@ def run_update(data_file, now):
         data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
         data["hourly"] = data["hourly"][-720:]
 
-    # 4. --- THE FIX FOR THE LEADERBOARD ---
-    # Append new entries to the existing store instead of replacing it
     data.setdefault("monthly_store", []).extend(new_entries)
-    
-    # Only prune entries that are NOT from the current month
     this_month = now.strftime("%Y-%m")
-    data["monthly_store"] = [e for e in data["monthly_store"] if e.get("ts", "").startswith(this_month)]
+    data["monthly_store"] = [e for e in data["monthly_store"] if "ts" in e and e["ts"].startswith(this_month)]
 
-    # 5. Calculate Rolling Windows
     day_ago = (now - timedelta(days=1)).isoformat()
     week_ago = (now - timedelta(days=7)).isoformat()
 
@@ -455,7 +468,6 @@ def run_update(data_file, now):
     week_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= week_ago])
     full_month = tally_users(data["monthly_store"])
 
-    # 6. Record history for unique mapper charts
     data.setdefault("daily_mapper_counts", []).append({"date": ts_str, "count": len(today_list)})
     data.setdefault("weekly_mapper_counts", []).append({"date": ts_str, "count": len(week_list)})
     data.setdefault("monthly_mapper_counts", []).append({"date": ts_str, "count": len(full_month)})
@@ -464,7 +476,6 @@ def run_update(data_file, now):
     data["weekly_mapper_counts"] = data["weekly_mapper_counts"][-720:]
     data["monthly_mapper_counts"] = data["monthly_mapper_counts"][-720:]
 
-    # 7. Update Leaderboards
     for u in full_month:
         u["d_today"] = next((x["objects"] for x in today_list if x["uid"] == u["uid"]), 0)
         u["d_week"] = next((x["objects"] for x in week_list if x["uid"] == u["uid"]), 0)
@@ -472,70 +483,22 @@ def run_update(data_file, now):
     data["monthly_leaderboard"] = full_month
     data["daily_leaderboard"] = today_list
 
-    # Hourly snapshot table
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
 
-    # 8. Final Save
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 def main():
-    # 1. Initialization and Page Writing
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
     pages = {"index.html": INDEX_HTML, "leaderboards.html": LEADERBOARD_HTML, "version.html": VERSION_HTML}
-    for f, c in pages.items(): 
-        (TARGET_DIR / f).write_text(c, encoding='utf-8')
+    for f, c in pages.items(): (TARGET_DIR / f).write_text(c, encoding='utf-8')
 
     data_file = TARGET_DIR / "data.json"
-    
-    # Track the last day ts.py was run to prevent multiple runs if script restarts at 12:05 AM
-    last_ts_run_day = None
-
-    # Load existing data immediately to populate last_ts_run_day if possible
-    if data_file.exists():
-        try:
-            temp_data = json.loads(data_file.read_text(encoding="utf-8"))
-            if "last_month_update" in temp_data:
-                # Extracts YYYY-MM-DD from the timestamp
-                last_ts_run_day = temp_data["last_month_update"].split('T')[0]
-        except:
-            pass
-
-    print(f"Starting OGFStats v{VERSION}...")
+    run_update(data_file, datetime.now(timezone.utc))
 
     while True:
-        try:
-            now = datetime.now(timezone.utc)
-            
-            # 2. Main Changeset Update (Preserves monthly_store internally)
-            run_update(data_file, now)
-            
-            # 3. Daily Task: Run Territory Stats (ts.py) at 12 AM
-            current_day = now.strftime("%Y-%m-%d")
-            # If it is the 00:00 hour and we haven't run it today yet
-            if now.hour == 0 and last_ts_run_day != current_day:
-                print(f"Midnight detected ({current_day} 00:00). Running ts.py...")
-                try:
-                    # Runs ts.py and waits for it to finish
-                    subprocess.run([sys.executable, "ts.py"], check=True)
-                    last_ts_run_day = current_day
-                    print("✓ ts.py completed successfully.")
-                except Exception as e:
-                    print(f"❌ Error running ts.py: {e}")
-
-        except Exception as e:
-            print(f"Critical Loop error: {e}")
-
-        # 4. Precision Sleep (Prevents Timing Drift)
-        # Calculate seconds until the exact start of the next hour
-        now = datetime.now(timezone.utc)
-        seconds_until_next_hour = 3600 - (now.minute * 60 + now.second) + 5 # 5s buffer for server clock
-        
-        print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {seconds_until_next_hour}s...")
-        time.sleep(max(0, seconds_until_next_hour))
-
-if __name__ == "__main__":
-    main()
+        time.sleep(3600)
+        run_update(data_file, datetime.now(timezone.utc))
 
 if __name__ == "__main__":
     main()
