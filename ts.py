@@ -1,42 +1,35 @@
-import argparse
-import json
-import sys
-import time
 import os
-import subprocess
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from urllib.request import urlopen, Request
-import xml.etree.ElementTree as ET
+import csv
+import json
+import time
+import requests
+from datetime import datetime
 
-# --- CONFIGURATION ---
-OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "5.1"
-TARGET_DIR = Path("/var/www/ogfstats")
+# ================= CONFIG =================
 
-VERSION_HISTORY = [
-    {"v": "5.1", "date": "2026-06-15", "note": "Added automatic system dark/light theme support across the entire site."},
-    {"v": "5.0", "date": "2026-03-25", "note": "More stats!!!!"},
-    {"v": "4.1", "date": "2026-01-28", "note": "Fixed errors with slashes and commas in place names."},
-    {"v": "4.0", "date": "2026-01-28", "note": "New Territory Stats tab."},
-    {"v": "3.3", "date": "2026-01-26", "note": "Refined monthly reset logic to preserve chart history."},
-    {"v": "3.2", "date": "2026-01-26", "note": "Optimized for static hosting in /var/www/."},
-    {"v": "3.1", "date": "2026-01-26", "note": "Updated file structure, version history tab added."},
-    {"v": "3.0", "date": "2026-01-26", "note": "Added Monthly Leaderboards, split webpage into tabs."},
-    {"v": "2.0", "date": "2025-08-22", "note": "First documented version."}
-]
+TERRITORY_URL = "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration?action=raw"
+OVERPASS_URL = "https://overpass.opengeofiction.net/api/interpreter"
 
-# --- SHARED COMPONENTS ---
-NAV_BAR = f"""
-  <div class="nav">
-    <a href="index.html" id="nav_charts">Charts</a>
-    <a href="leaderboards.html" id="nav_leaderboards">Leaderboards</a>
-    <a href="territory.html" id="nav_territory">Territory Stats</a>
-    <a href="version.html" id="nav_version">v{VERSION}</a>
-  </div>
-"""
+DATA_DIR = "/var/www/ogfstats/tdata"
+ADMIN_DIR = os.path.join(DATA_DIR, "territory-admin")
+STATS_DIR = os.path.join(DATA_DIR, "territory")
+LATEST_FILE = os.path.join(DATA_DIR, "territory-latest.csv")
 
-GOOGLE_BLOCK = """
+HTML_OUTPUT_PATH = "/var/www/ogfstats/territory.html"
+
+os.makedirs(ADMIN_DIR, exist_ok=True)
+os.makedirs(STATS_DIR, exist_ok=True)
+
+ADMIN_JSON = os.path.join(ADMIN_DIR, "territory_admin.json")
+WEEK_IN_SECONDS = 604800  # 7 days * 24h * 60m * 60s
+
+# ================= HTML TEMPLATE =================
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OGF Territory Stats</title>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-7BV9Y2QVPZ"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -44,478 +37,324 @@ GOOGLE_BLOCK = """
   gtag('js', new Date());
   gtag('config', 'G-7BV9Y2QVPZ');
 </script>
-"""
-
-STYLE_BLOCK = """
-  <style>
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="https://code.highcharts.com/modules/accessibility.js"></script>
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
     /* Default Light Theme Variables */
-    :root {
-      --primary: #007bff;
-      --bg-body: #fafafa;
-      --bg-card: #ffffff;
-      --text-main: #1e293b;
-      --text-muted: #666666;
-      --border-color: #eeeeee;
-      --table-hover: #f5f9ff;
-      --btn-bg: #f5f5f5;
-      --btn-border: #dddddd;
+    :root { 
+        --primary: #007bff; 
+        --primary-hover: #0056b3; 
+        --nav-bg: #333; 
+        --border: #e2e8f0; 
+        --panel-bg: #ffffff; 
+        --body-bg: #fafafa; 
+        --text-main: #1e293b;
+        --text-muted: #666666;
+        --btn-bg: #f5f5f5;
+        --table-hover: #f5f9ff;
+        --input-bg: #ffffff;
     }
 
     /* Automatic Dark Theme Overrides */
     @media (prefers-color-scheme: dark) {
-      :root {
-        --bg-body: #121212;
-        --bg-card: #1e1e1e;
-        --text-main: #f1f5f9;
-        --text-muted: #94a3b8;
-        --border-color: #2e2e2e;
-        --table-hover: #252526;
-        --btn-bg: #2d2d2d;
-        --btn-border: #444444;
-      }
+        :root {
+            --body-bg: #121212;
+            --panel-bg: #1e1e1e;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #2e2e2e;
+            --btn-bg: #2d2d2d;
+            --table-hover: #252526;
+            --input-bg: #2d2d2d;
+        }
     }
 
-    body { font-family: sans-serif; background: var(--bg-body); margin:0; padding:0; color: var(--text-main); transition: background 0.3s, color 0.3s; }
-    .nav { background: #333; color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }
-    .nav a { color: #ccc; text-decoration: none; font-weight: bold; padding: 5px 15px; border-radius: 4px; transition: 0.2s; }
+    body { font-family: sans-serif; background: var(--body-bg); margin: 0; padding: 0; color: var(--text-main); transition: background 0.3s, color 0.3s; }
+    .nav { background: var(--nav-bg); color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }
+    .nav a { color: #ccc; text-decoration: none; font-weight: bold; cursor: pointer; padding: 5px 15px; border-radius: 4px; transition: 0.2s; }
     .nav a:hover { color: white; background: #444; }
     .nav a.active { color: white; background: var(--primary); }
-    .wrap { max-width: 1500px; margin: 24px auto; padding: 16px; }
-    .card { background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
-    .card.full-width { grid-column: 1 / -1; }
-    h1 { font-size: 24px; margin: 0 0 16px; }
-    h2 { font-size: 18px; margin-top: 0; color: var(--text-main); border-bottom: 2px solid var(--primary); display: inline-block; padding-bottom: 4px; margin-bottom: 15px; }
-    .meta { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
-    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 20px; }
-    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 15px; }
-    .chart-container { width: 100%; height: 350px; }
-    .btns { margin-bottom: 12px; display: flex; gap: 8px; }
-    button { padding: 6px 12px; border: 1px solid var(--btn-border); border-radius: 6px; background: var(--btn-bg); color: var(--text-main); cursor:pointer; font-size: 13px; }
-    button.active { background: var(--primary); color:white; border-color: var(--primary); }
-    .table-container { border-radius: 12px; overflow: hidden; border: 1px solid #007bff33; margin-top: 10px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; transition: background 0.2s; }
-    th:hover { background: #0056b3; }
-    td { padding: 10px; border-bottom: 1px solid var(--border-color); font-size: 12px; color: var(--text-main); }
+    .wrap { max-width: 1500px; margin: 24px auto; padding: 0 16px; }
+    .header-section { margin-bottom: 20px; }
+    h1 { font-size: 22px; margin: 0 0 8px 0; color: var(--text-main); }
+    .meta { color: var(--text-muted); font-size: 14px; }
+    .dashboard-container { display: flex; gap: 20px; align-items: flex-start; }
+    .control-panel { width: 320px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 16px; padding: 16px; position: sticky; top: 70px; display: flex; flex-direction: column; max-height: calc(100vh - 100px); box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
+    .search-box { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-main); border-radius: 6px; box-sizing: border-box; font-size: 14px; outline: none; }
+    .btn-group { display: flex; gap: 8px; margin-bottom: 12px; }
+    .btn-group button { flex: 1; padding: 8px; cursor: pointer; border-radius: 6px; border: 1px solid var(--border); background: var(--btn-bg); color: var(--text-main); font-size: 12px; font-weight: bold; transition: 0.2s; }
+    .table-scroll { flex: 1; overflow-y: auto; border: 1px solid #007bff33; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { position: sticky; top: 0; background: var(--primary); color: white; padding: 10px 8px; text-align: left; z-index: 10; }
+    td { padding: 8px; border-bottom: 1px solid var(--border); cursor: pointer; color: var(--text-main); }
     tr:hover { background: var(--table-hover); }
+    .charts-area { flex: 1; min-width: 0; }
+    .chart-card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
+    .chart-container { width: 100%; height: 420px; }
     .footer { text-align: center; color: var(--text-muted); font-size: 12px; margin: 40px 0; }
-    .leaderboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
-    .leaderboard-card { background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border-color); padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
-  </style>
-"""
-
-# --- 1. INDEX.HTML ---
-INDEX_HTML = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" /><title>OGFStats - Dashboard</title>
-  {GOOGLE_BLOCK}
-  {STYLE_BLOCK}
-  <script src="https://code.highcharts.com/highcharts.js"></script>
+</style>
 </head>
 <body>
-  {NAV_BAR}
-  <div class="wrap">
-    <h1>Mapping Activity</h1>
-    <p class="meta" id="updateTime">Loading...</p>
-
-    <div class="grid-2">
-        <div class="card">
-            <h2>Latest Changeset ID</h2>
-            <div id="chartID" class="chart-container"></div>
-        </div>
-        <div class="card">
-            <h2>Activity Volume</h2>
-            <div class="btns">
-                <button id="btnHourly" class="active" onclick="setMode('hourly')">Hourly</button>
-                <button id="btnDaily" onclick="setMode('daily')">Daily</button>
-            </div>
-            <div id="chartDiff" class="chart-container"></div>
-        </div>
-
-        <div class="card full-width">
-            <h2>Active Users (Activity Trends)</h2>
-            <div id="mapperChart" class="chart-container" style="height: 400px;"></div>
-        </div>
-
-        <div class="card">
-            <h2>Top Mappers This Month</h2>
-            <div class="btns">
-                <button id="btnBarObjs" class="active" onclick="setBarMetric('objects')">By Objects</button>
-                <button id="btnBarEdits" onclick="setBarMetric('count')">By Edits</button>
-            </div>
-            <div id="userBarChart" class="chart-container" style="height: 435px;"></div>
-        </div>
-        <div class="card">
-            <h2>User Activity Summary</h2>
-            <div class="table-container">
-                <table id="deltaTable">
-                    <thead>
-                        <tr>
-                            <th onclick="sortRows('deltaTable', 0)">Name</th>
-                            <th onclick="sortRows('deltaTable', 1)">Today (Objs)</th>
-                            <th onclick="sortRows('deltaTable', 2)">Week (Objs)</th>
-                            <th onclick="sortRows('deltaTable', 3)">Month (Objs)</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </div>
+<div class="nav"><a href="index.html">Charts</a><a href="leaderboards.html">Leaderboards</a><a class="active">Territory Stats</a><a href="version.html">v5.1</a></div>
+<div class="wrap">
+    <div class="header-section"><h1>Territory Evolution Stats</h1><p class="meta" id="updateTime">Loading data...</p></div>
+    <div class="dashboard-container">
+        <aside class="control-panel">
+            <input type="text" id="search" class="search-box" placeholder="Search territories...">
+            <div class="btn-group"><button onclick="toggleAll(true)">Show All</button><button onclick="toggleAll(false)">Hide All</button></div>
+            <div class="table-scroll"><table><thead><tr><th width="30"></th><th>Territory</th></tr></thead><tbody id="territoryList"></tbody></table></div>
+        </aside>
+        <main class="charts-area">
+            <div class="chart-card"><div id="nodesHist" class="chart-container"></div></div>
+            <div class="chart-card"><div id="waysHist" class="chart-container"></div></div>
+            <div class="chart-card"><div id="relationsHist" class="chart-container"></div></div>
+            <div class="chart-card"><div id="nodesBar" class="chart-container"></div></div>
+            <div class="chart-card"><div id="waysBar" class="chart-container"></div></div>
+            <div class="chart-card"><div id="relationsBar" class="chart-container"></div></div>
+            <div class="footer">OGFStats by minimapper :)</div>
+        </main>
     </div>
-  </div>
-  <div class="footer">OGFStats by minimapper :)</div>
+</div>
+<script>
+let lineCharts = [];
+let loadedData = {};
 
-  <script>
-    document.getElementById('nav_charts').classList.add('active');
-    let rawData = null;
-    let mode = 'hourly';
-    let barMetric = 'objects';
-    let sortDirections = {{}};
+// Handle Highcharts dark mode themes automatically
+Highcharts.setOptions({
+    chart: { backgroundColor: 'transparent' }
+});
 
-    // Let Highcharts adjust text and elements to the theme dynamically
-    Highcharts.setOptions({{
-        chart: {{ backgroundColor: 'transparent' }}
-    }});
+async function loadCSV(path) {
+    const res = await fetch(path , { cache: "no-store" });
+    if (!res.ok) throw new Error("File not found");
+    const text = await res.text();
+    return Papa.parse(text, { header: true, skipEmptyLines: true }).data;
+}
 
-    function setMode(m) {{
-        mode = m;
-        document.getElementById('btnHourly').classList.toggle('active', m === 'hourly');
-        document.getElementById('btnDaily').classList.toggle('active', m === 'daily');
-        renderTrend();
-    }}
+async function buildDashboard() {
+    const snapshot = await loadCSV("./tdata/territory-latest.csv");
 
-    function setBarMetric(m) {{
-        barMetric = m;
-        document.getElementById('btnBarObjs').classList.toggle('active', m === 'objects');
-        document.getElementById('btnBarEdits').classList.toggle('active', m === 'count');
-        renderBar();
-    }}
+    lineCharts = [
+        createLineChart("nodesHist", "Nodes Over Time", "Nodes"),
+        createLineChart("waysHist", "Ways Over Time", "Ways"),
+        createLineChart("relationsHist", "Relations Over Time", "Relations")
+    ];
 
-    function renderTrend() {{
-        const entries = rawData[mode];
-        const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
-        Highcharts.chart('chartDiff', {{
-            chart: {{ type: 'column', zoomType: 'x' }},
-            title: {{ text: 'Changesets', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ type: 'datetime', crosshair: true }},
-            yAxis: {{ title: {{ text: 'Count' }} }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
-            series: [{{ name: 'Changesets', data: diffSeries, color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
+    const barData = {
+        nodes: snapshot.map(r => ({ name: r.territory, y: +r.nodes })),
+        ways: snapshot.map(r => ({ name: r.territory, y: +r.ways })),
+        relations: snapshot.map(r => ({ name: r.territory, y: +r.relations }))
+    };
+    createBarChart("nodesBar", "Current Nodes", "Nodes", barData.nodes, '#007bff');
+    createBarChart("waysBar", "Current Ways", "Ways", barData.ways, '#007bff');
+    createBarChart("relationsBar", "Current Relations", "Relations", barData.relations, '#007bff');
 
-        const idSeries = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
-        Highcharts.chart('chartID', {{
-            chart: {{ type: 'line', zoomType: 'x' }},
-            title: {{ text: 'ID History', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ type: 'datetime', crosshair: true }},
-            yAxis: {{ title: {{ text: 'ID' }}, startOnTick: false, endOnTick: false }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ line: {{ stickyTracking: true }} }},
-            series: [{{ name: 'Latest ID', data: idSeries, color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
-    }}
+    const listBody = document.getElementById('territoryList');
+    snapshot.sort((a,b) => a.territory.localeCompare(b.territory)).forEach((row, i) => {
+        const name = row.territory;
+        const tr = document.createElement('tr');
+        const shouldAutoLoad = i < 5;
 
-    function renderBar() {{
-        let sorted = [...rawData.monthly_leaderboard].sort((a,b) => b[barMetric] - a[barMetric]).slice(0, 20);
-        Highcharts.chart('userBarChart', {{
-            chart: {{ type: 'column' }},
-            title: {{ text: 'User Ranking', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ categories: sorted.map(u => u.user), crosshair: true }},
-            yAxis: {{ title: {{ text: barMetric === 'count' ? 'Edits' : 'Objects' }} }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
-            series: [{{ name: barMetric === 'count' ? 'Edits' : 'Objects Changed', data: sorted.map(u => u[barMetric]), color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
-    }}
+        tr.innerHTML = `<td><input type="checkbox" class="chk" data-name="${name}" data-rel="${row.rel}" ${shouldAutoLoad ? 'checked' : ''}></td><td>${name}</td>`;
+        tr.onclick = (e) => {
+            if(e.target.type !== 'checkbox') {
+                const cb = tr.querySelector('.chk');
+                cb.checked = !cb.checked;
+                toggleTerritory(name, row.rel, cb.checked);
+            }
+        };
+        tr.querySelector('.chk').onchange = (e) => toggleTerritory(name, row.rel, e.target.checked);
+        listBody.appendChild(tr);
 
-    function sortRows(tableId, colIndex) {{
-        const table = document.getElementById(tableId);
-        const tbody = table.tBodies[0];
-        const rows = Array.from(tbody.rows);
-        const sortKey = tableId + colIndex;
-        sortDirections[sortKey] = !sortDirections[sortKey];
-        const ascending = sortDirections[sortKey];
-        const sortedRows = rows.sort((a, b) => {{
-            const valA = a.cells[colIndex].innerText;
-            const valB = b.cells[colIndex].innerText;
-            const numA = parseFloat(valA);
-            const numB = parseFloat(valB);
-            if (!isNaN(numA) && !isNaN(numB)) return ascending ? numA - numB : numB - numA;
-            return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        }});
-        tbody.append(...sortedRows);
-    }}
+        if(shouldAutoLoad) toggleTerritory(name, row.rel, true);
+    });
 
-    async function load() {{
-        const resp = await fetch('data.json', {{ cache: 'no-store' }});
-        rawData = await resp.json();
-        document.getElementById('updateTime').innerText = "Last Sync: " + rawData.last_month_update;
+    document.getElementById("updateTime").innerText = "Last update: " + (snapshot[0]?.timestamp || "Unknown");
+}
 
-        const mapperDaily = (rawData.daily_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
-        const mapperWeekly = (rawData.weekly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
-        const mapperMonthly = (rawData.monthly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
+async function toggleTerritory(name, rel, state) {
+    if (state) {
+        if (!loadedData[name]) {
+            const safeName = name.replace(/,/g, "")
+                                 .replace(/\\//g, "-")
+                                 .replace(/\\\\/g, "-")
+                                 .replace(/ /g, "_");
 
-        Highcharts.chart('mapperChart', {{
-            chart: {{ type: 'line', zoomType: 'x' }},
-            title: {{ text: 'Unique Mappers (Rolling)', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ type: 'datetime', crosshair: true }},
-            yAxis: {{ title: {{ text: 'Unique Users' }} }},
-            tooltip: {{ shared: true, crosshair: true }},
-            series: [
-                {{ name: 'Daily Unique', data: mapperDaily, color: '#007bff' }},
-                {{ name: 'Weekly Unique', data: mapperWeekly, color: '#28a745', visible: false }},
-                {{ name: 'Monthly Unique', data: mapperMonthly, color: '#dc3545', visible: false }}
-            ],
-            credits: {{ enabled: false }}
-        }});
-
-        const tbody = document.querySelector("#deltaTable tbody");
-        const sorted = [...rawData.monthly_leaderboard].sort((a,b) => b.objects - a.objects).slice(0, 15);
-        tbody.innerHTML = sorted.map(u =>
-            `<tr><td>${{u.user}}</td><td>${{u.d_today || 0}}</td><td>${{u.d_week || 0}}</td><td>${{u.objects}}</td></tr>`
-        ).join('');
-
-        renderTrend();
-        renderBar();
-    }}
-    load();
-  </script>
-</body></html>"""
-
-# --- 2. LEADERBOARDS.HTML ---
-LEADERBOARD_HTML = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" /><title>OGFStats - Leaderboards</title>
-  {GOOGLE_BLOCK}
-  {STYLE_BLOCK}
-  <script src="https://code.highcharts.com/highcharts.js"></script>
-</head>
-<body>
-  {NAV_BAR}
-  <div class="wrap">
-    <h1>User Leaderboards</h1>
-
-    <div class="card full-width">
-        <h2>Objects Changed (Monthly Overview)</h2>
-        <div id="fullUserChart" class="chart-container" style="height: 400px;"></div>
-    </div>
-
-    <div class="leaderboard-grid">
-      <div class="leaderboard-card"><h2>Hourly</h2><div class="table-container"><table id="hourlyTable"><thead><tr><th onclick="sortRows('hourlyTable', 0)">User</th><th onclick="sortRows('hourlyTable', 1)">UID</th><th onclick="sortRows('hourlyTable', 2)">Edits</th><th onclick="sortRows('hourlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="leaderboard-card"><h2>Daily (Rolling 24h)</h2><div class="table-container"><table id="dailyTable"><thead><tr><th onclick="sortRows('dailyTable', 0)">User</th><th onclick="sortRows('dailyTable', 1)">UID</th><th onclick="sortRows('dailyTable', 2)">Edits</th><th onclick="sortRows('dailyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="leaderboard-card"><h2>Monthly</h2><div class="table-container"><table id="monthlyTable"><thead><tr><th onclick="sortRows('monthlyTable', 0)">User</th><th onclick="sortRows('monthlyTable', 1)">UID</th><th onclick="sortRows('monthlyTable', 2)">Edits</th><th onclick="sortRows('monthlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
-    </div>
-  </div>
-
-  <script>
-    document.getElementById('nav_leaderboards').classList.add('active');
-    let sortDirections = {{}};
-
-    Highcharts.setOptions({{
-        chart: {{ backgroundColor: 'transparent' }}
-    }});
-
-    function renderFullChart(users) {{
-        const sorted = [...users].sort((a,b) => b.objects - a.objects);
-        Highcharts.chart('fullUserChart', {{
-            chart: {{ type: 'column' }},
-            title: {{ text: 'Full Distribution (Linear)', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ categories: sorted.map(u => u.user), labels: {{ enabled: false }}, crosshair: true }},
-            yAxis: {{ title: {{ text: 'Objects Changed' }} }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
-            series: [{{ name: 'Objects', data: sorted.map(u => u.objects), color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
-    }}
-
-    ...  # Rest of fillTable, sortRows, and load dynamically remain intact as in your original file
-
-    async function load() {{
-        const resp = await fetch('data.json', {{ cache: 'no-store' }});
-        const data = await resp.json();
-        renderFullChart(data.monthly_leaderboard || []);
-        fillTable('hourlyTable', data.hourly_leaderboards?.slice(-1)[0]?.leaderboard || []);
-        fillTable('dailyTable', data.daily_leaderboard || []);
-        fillTable('monthlyTable', data.monthly_leaderboard || []);
-    }}
-    load();
-  </script>
-</body></html>"""
-
-# --- 3. VERSION.HTML ---
-VERSION_HTML = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8" /><title>Version History</title>{GOOGLE_BLOCK}{STYLE_BLOCK}</head>
-<body>
-  {NAV_BAR}
-  <div class="wrap">
-    <div class="card">
-        <h1>Version History</h1>
-        <div id="versionList"></div>
-    </div>
-  </div>
-  <script>
-    document.getElementById('nav_version').classList.add('active');
-    const historyData = {json.dumps(VERSION_HISTORY)};
-    document.getElementById('versionList').innerHTML = historyData.map(v => `
-        <div style="border-bottom: 1px solid var(--border-color); padding: 12px 0;">
-            <span style="background: var(--btn-bg); color: var(--text-main); padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">v\${{v.v}}</span>
-            <strong>\${{v.date}}</strong>
-            <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-muted);">\${{v.note}}</p>
-        </div>
-    `).join('');
-  </script>
-</body></html>"""
-
-# --- PYTHON LOGIC (STAYS EXACTLY THE SAME) ---
-def get_initial_data():
-    return {
-        "hourly": [], "daily": [], "hourly_leaderboards": [],
-        "rolling24": [], "monthly_store": [], "monthly_leaderboard": [],
-        "last_month_update": "", "seen_ids": [],
-        "daily_mapper_counts": [], "weekly_mapper_counts": [], "monthly_mapper_counts": []
+            const file = `tdata/territory/${safeName}_${rel}.csv`;
+            try {
+                const rows = await loadCSV(file);
+                loadedData[name] = {
+                    nodes: rows.map(r => [Date.parse(r.timestamp), +r.nodes]),
+                    ways: rows.map(r => [Date.parse(r.timestamp), +r.ways]),
+                    relations: rows.map(r => [Date.parse(r.timestamp), +r.relations])
+                };
+            } catch(e) { return; }
+        }
+        lineCharts[0].addSeries({ id: name, name: name, data: loadedData[name].nodes }, false);
+        lineCharts[1].addSeries({ id: name, name: name, data: loadedData[name].ways }, false);
+        lineCharts[2].addSeries({ id: name, name: name, data: loadedData[name].relations }, false);
+    } else {
+        lineCharts.forEach(chart => {
+            const s = chart.get(name);
+            if (s) s.remove(false);
+        });
     }
+    lineCharts.forEach(c => c.redraw());
+}
 
-def fetch_recent_changesets(lookback_hours=2):
-    start_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-    url = f"{OGF_CHANGESETS_URL}?time={start_time.strftime('%Y-%m-%dT%H:00:00Z')}"
-    req = Request(url, headers={"User-Agent": f"ogf-stats-script/{VERSION}"})
-    try:
-        with urlopen(req, timeout=20) as resp:
-            root = ET.fromstring(resp.read())
-        return [{
-            "id": cs.get("id"),
-            "user": cs.get("user"),
-            "uid": cs.get("uid"),
-            "changes_count": int(cs.get("changes_count", "0")),
-            "ts": cs.get("created_at")
-        } for cs in root.findall("changeset")]
-    except Exception as e:
-        print(f"Fetch error: {e}"); return []
+function createLineChart(id, title, yAxisName) {
+    return Highcharts.chart(id, {
+        chart: { type: 'line', zoomType: 'x', style: { fontFamily: 'sans-serif' } },
+        title: { text: title, align: 'left', style: { fontWeight: 'bold' } },
+        xAxis: { type: 'datetime' },
+        yAxis: { title: { text: yAxisName } },
+        legend: { enabled: false },
+        tooltip: { shared: true, crosshairs: true },
+        plotOptions: {
+            series: {
+                marker: { enabled: true, radius: 2 },
+                dataGrouping: { enabled: false },
+                stickyTracking: true,
+                findNearestPointBy: 'x',
+                turboThreshold: 0,
+                animation: false
+            }
+        },
+        credits: { enabled: false },
+        series: []
+    });
+}
 
-def tally_users(entries):
-    counts = {}
-    for e in entries:
-        key = (e["user"], e["uid"])
-        if key not in counts: counts[key] = {"count": 0, "objects": 0}
-        counts[key]["count"] += 1; counts[key]["objects"] += e.get("changes_count", 0)
-    return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]} for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
+function createBarChart(id, title, yAxisName, data, color) {
+    data.sort((a,b) => b.y - a.y);
+    Highcharts.chart(id, {
+        chart: { type: 'column' },
+        title: { text: title, align: 'left', style: { fontWeight: 'bold' } },
+        xAxis: { categories: data.map(d => d.name), labels: { enabled: false }, crosshair: true },
+        yAxis: { title: { text: yAxisName } },
+        tooltip: { shared: true, intersect: false },
+        plotOptions: { column: { stickyTracking: true, borderWidth: 0 } },
+        credits: { enabled: false },
+        series: [{ name: yAxisName, data: data.map(d => d.y), color: color }]
+    });
+}
 
-def run_update(data_file, now):
-    data = get_initial_data()
-    if data_file.exists():
+function toggleAll(state) {
+    document.querySelectorAll('.chk').forEach(cb => {
+        if(cb.checked !== state) {
+            cb.checked = state;
+            toggleTerritory(cb.dataset.name, cb.dataset.rel, state);
+        }
+    });
+}
+
+document.getElementById('search').addEventListener('input', (e) => {
+    const val = e.target.value.toLowerCase();
+    document.querySelectorAll('#territoryList tr').forEach(tr => {
+        tr.style.display = tr.innerText.toLowerCase().includes(val) ? '' : 'none';
+    });
+});
+
+buildDashboard();
+</script>
+</body>
+</html>"""
+
+# ================= HELPERS =================
+
+def fetch_admin_json():
+    """Downloads the territory admin file if missing or older than 1 week."""
+    should_download = False
+
+    if not os.path.exists(ADMIN_JSON):
+        print("Admin JSON missing. Downloading...")
+        should_download = True
+    else:
+        # Check file age
+        file_age = time.time() - os.path.getmtime(ADMIN_JSON)
+        if file_age > WEEK_IN_SECONDS:
+            print("Admin JSON is over a week old. Updating...")
+            should_download = True
+
+    if should_download:
         try:
-            loaded_data = json.loads(data_file.read_text(encoding="utf-8"))
-            data.update(loaded_data)
+            r = requests.get(TERRITORY_URL, timeout=60)
+            r.raise_for_status()
+            with open(ADMIN_JSON, "w", encoding="utf-8") as f:
+                f.write(r.text)
+            print("✓ Admin JSON updated successfully.")
         except Exception as e:
-            print(f"Warning: Could not load existing data: {e}")
+            print(f"❌ Failed to update Admin JSON: {e}")
+            if not os.path.exists(ADMIN_JSON):
+                raise # Exit if we don't even have a stale version to fall back on
 
-    raw_entries = fetch_recent_changesets()
-    seen = set(data.get("seen_ids", []))
-    new_entries = [e for e in raw_entries if e["id"] not in seen]
-    for e in new_entries:
-        seen.add(e["id"])
+def load_owned_territories():
+    with open(ADMIN_JSON, encoding="utf-8") as f:
+        data = json.load(f)
+    return [t for t in data if t.get("status") == "owned" and t.get("rel")]
 
-    data["seen_ids"] = list(seen)[-5000:]
+def run_overpass(rel_id):
+    query = f'[out:json][timeout:900];relation({rel_id})->.rel;.rel map_to_area->.a;(node(area.a);way(area.a);relation(area.a););out count;.rel convert relation ::id = id(), name = t["name:en"] ? t["name:en"] : t["name"];out;'
+    r = requests.post(OVERPASS_URL, data=query, timeout=300)
+    r.raise_for_status()
+    return r.json()
 
-    bucket_ts = now.replace(minute=0, second=0, microsecond=0)
-    ts_str = bucket_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
-    data["last_month_update"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+def parse_overpass(data):
+    counts = next(el["tags"] for el in data["elements"] if el["type"] == "count")
+    name = next((el.get("tags", {}).get("name", "unknown") for el in data["elements"] if el["type"] == "relation"), "unknown")
 
-    if raw_entries:
-        cid = int(raw_entries[0]["id"])
-    elif data["hourly"]:
-        cid = data["hourly"][-1]["changeset_id"]
-    else:
-        cid = 0
+    # SCRUBBING: Remove commas and hidden line breaks for CSV safety
+    name = name.replace('\n', ' ').replace('\r', ' ').replace(',', '').strip()
+    name = " ".join(name.split())
 
-    existing_hourly = next((item for item in data["hourly"] if item["timestamp"] == ts_str), None)
-    if existing_hourly:
-        existing_hourly["change"] += len(new_entries)
-        existing_hourly["changeset_id"] = cid
-    else:
-        data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
-        data["hourly"] = data["hourly"][-720:]
+    return name, {k: int(counts[k]) for k in ["nodes", "ways", "relations", "areas", "total"]}
 
-    data.setdefault("monthly_store", []).extend(new_entries)
-    this_month = now.strftime("%Y-%m")
-    data["monthly_store"] = [e for e in data["monthly_store"] if e.get("ts", "").startswith(this_month)]
-
-    day_ago = (now - timedelta(days=1)).isoformat()
-    week_ago = (now - timedelta(days=7)).isoformat()
-
-    today_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= day_ago])
-    week_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= week_ago])
-    full_month = tally_users(data["monthly_store"])
-
-    data.setdefault("daily_mapper_counts", []).append({"date": ts_str, "count": len(today_list)})
-    data.setdefault("weekly_mapper_counts", []).append({"date": ts_str, "count": len(week_list)})
-    data.setdefault("monthly_mapper_counts", []).append({"date": ts_str, "count": len(full_month)})
-
-    data["daily_mapper_counts"] = data["daily_mapper_counts"][-720:]
-    data["weekly_mapper_counts"] = data["weekly_mapper_counts"][-720:]
-    data["monthly_mapper_counts"] = data["monthly_mapper_counts"][-720:]
-
-    for u in full_month:
-        u["d_today"] = next((x["objects"] for x in today_list if x["uid"] == u["uid"]), 0)
-        u["d_week"] = next((x["objects"] for x in week_list if x["uid"] == u["uid"]), 0)
-
-    data["monthly_leaderboard"] = full_month
-    data["daily_leaderboard"] = today_list
-
-    data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
-    data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
-
-    data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+# ================= MAIN =================
 
 def main():
-    TARGET_DIR.mkdir(parents=True, exist_ok=True)
-    pages = {"index.html": INDEX_HTML, "leaderboards.html": LEADERBOARD_HTML, "version.html": VERSION_HTML}
-    for f, c in pages.items():
-        (TARGET_DIR / f).write_text(c, encoding='utf-8')
+    fetch_admin_json()
+    territories = load_owned_territories()
 
-    data_file = TARGET_DIR / "data.json"
-    last_ts_run_day = None
+    with open(HTML_OUTPUT_PATH, "w", encoding="utf-8") as f:
+        f.write(HTML_TEMPLATE)
+    print(f"✓ HTML file created at {HTML_OUTPUT_PATH}.")
 
-    if data_file.exists():
+    timestamp = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    fieldnames = ["territory", "rel", "nodes", "ways", "relations", "areas", "total", "timestamp"]
+
+    print(f"Processing {len(territories)} territories...")
+
+    for i, t in enumerate(territories):
+        rel_id = t["rel"]
         try:
-            temp_data = json.loads(data_file.read_text(encoding="utf-8"))
-            if "last_month_update" in temp_data:
-                last_ts_run_day = temp_data["last_month_update"].split('T')[0]
-        except:
-            pass
-
-    print(f"Starting OGFStats v{VERSION}...")
-
-    while True:
-        try:
-            now = datetime.now(timezone.utc)
-            run_update(data_file, now)
-
-            current_day = now.strftime("%Y-%m-%d")
-            if now.hour == 0 and last_ts_run_day != current_day:
-                print(f"Midnight detected ({current_day} 00:00). Running ts.py...")
-                try:
-                    subprocess.run([sys.executable, "ts.py"], check=True)
-                    last_ts_run_day = current_day
-                    print("✓ ts.py completed successfully.")
-                except Exception as e:
-                    print(f"❌ Error running ts.py: {e}")
-
+            data = run_overpass(rel_id)
+            name, stats = parse_overpass(data)
         except Exception as e:
-            print(f"Critical Loop error: {e}")
+            print(f"  ❌ Failed rel {rel_id}: {e}")
+            continue
 
-        now = datetime.now(timezone.utc)
-        seconds_until_next_hour = 3600 - (now.minute * 60 + now.second) + 5
-        print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {seconds_until_next_hour}s...")
-        time.sleep(max(0, seconds_until_next_hour))
+        # FILENAME SAFETY: remove commas, turn slashes to dashes
+        safe_name = name.replace(",", "").replace("/", "-").replace("\\", "-").replace(" ", "_")
+
+        # 1. Append to History
+        hist_path = os.path.join(STATS_DIR, f"{safe_name}_{rel_id}.csv")
+        write_h = not os.path.exists(hist_path)
+        with open(hist_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+            if write_h:
+                writer.writerow(["timestamp", "nodes", "ways", "relations", "areas", "total"])
+            writer.writerow([timestamp, stats["nodes"], stats["ways"], stats["relations"], stats["areas"], stats["total"]])
+
+        # 2. Update Latest Snapshot
+        mode = 'w' if i == 0 else 'a'
+        with open(LATEST_FILE, mode, newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
+            if i == 0: writer.writeheader()
+            writer.writerow({"territory": name, "rel": rel_id, **stats, "timestamp": timestamp})
+
+        print(f"[{i+1}/{len(territories)}] Processed: {name}")
+        time.sleep(2)
 
 if __name__ == "__main__":
     main()
