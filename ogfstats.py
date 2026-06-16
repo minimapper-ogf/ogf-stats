@@ -387,10 +387,10 @@ VERSION_HTML = f"""<!DOCTYPE html>
     document.getElementById('nav_version').classList.add('active');
     const historyData = {json.dumps(VERSION_HISTORY)};
     document.getElementById('versionList').innerHTML = historyData.map(v => `
-        <div style="border-bottom: 1px solid var(--border-color); padding: 12px 0;">
-            <span style="background: var(--btn-bg); color: var(--text-main); padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">v\${{v.v}}</span>
-            <strong>\Technical terms match standard styling: \${{v.date}}</strong>
-            <p style="margin: 8px 0 0; font-size: 14px; color: var(--text-muted);">\${{v.note}}</p>
+        <div style="border-bottom: 1px solid #eee; padding: 12px 0;">
+            <span style="background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">v${{v.v}}</span>
+            <strong>${{v.date}}</strong>
+            <p style="margin: 8px 0 0; font-size: 14px; color: #444;">${{v.note}}</p>
         </div>
     `).join('');
   </script>
