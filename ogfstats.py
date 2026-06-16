@@ -38,7 +38,7 @@ NAV_BAR = f"""
         <a href="/territory.html" id="nav_territory">Territory Stats</a>
         <a href="/version.html" id="nav_version">v{VERSION}</a>
         <div style="margin-left:12px; display:flex; align-items:center; position:relative;">
-            <input id="siteSearch" placeholder="Search users..." style="padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:var(--input-bg, #fff); color:var(--text-main); width:260px;" autocomplete="off" />
+            <input id="siteSearch" placeholder="Search users..." style="padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:var(--input-bg); color:var(--text-main); width:260px;" autocomplete="off" />
             <div id="searchSuggestions" style="display:none; position:absolute; top:42px; right:0; width:320px; max-height:360px; overflow:auto; background:var(--bg-card); border:1px solid var(--border-color); box-shadow:0 8px 24px rgba(0,0,0,0.15); border-radius:10px; padding:8px; z-index:2000;"></div>
         </div>
     </div>
