@@ -489,16 +489,56 @@ def run_update(data_file, now):
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 def main():
+    # 1. Initialization and Page Writing
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
     pages = {"index.html": INDEX_HTML, "leaderboards.html": LEADERBOARD_HTML, "version.html": VERSION_HTML}
-    for f, c in pages.items(): (TARGET_DIR / f).write_text(c, encoding='utf-8')
+    for f, c in pages.items(): 
+        (TARGET_DIR / f).write_text(c, encoding='utf-8')
 
     data_file = TARGET_DIR / "data.json"
-    run_update(data_file, datetime.now(timezone.utc))
+    
+    # Track the last day ts.py was run to prevent multiple runs if script restarts
+    last_ts_run_day = None
+
+    # Load existing data immediately to populate last_ts_run_day if possible
+    if data_file.exists():
+        try:
+            temp_data = json.loads(data_file.read_text(encoding="utf-8"))
+            if "last_month_update" in temp_data:
+                last_ts_run_day = temp_data["last_month_update"].split('T')[0]
+        except:
+            pass
+
+    print(f"Starting OGFStats v{VERSION}...")
 
     while True:
-        time.sleep(3600)
-        run_update(data_file, datetime.now(timezone.utc))
+        try:
+            now = datetime.now(timezone.utc)
+            
+            # 2. Main Changeset Update
+            run_update(data_file, now)
+            
+            # 3. Daily Task: Run Territory Stats (ts.py) at 12 AM
+            current_day = now.strftime("%Y-%m-%d")
+            if now.hour == 0 and last_ts_run_day != current_day:
+                print(f"Midnight detected ({current_day} 00:00). Running ts.py...")
+                try:
+                    # Runs ts.py and waits for it to finish
+                    subprocess.run([sys.executable, "ts.py"], check=True)
+                    last_ts_run_day = current_day
+                    print("✓ ts.py completed successfully.")
+                except Exception as e:
+                    print(f"❌ Error running ts.py: {e}")
+
+        except Exception as e:
+            print(f"Critical Loop error: {e}")
+
+        # 4. Precision Sleep (Prevents Timing Drift so it hits midnight perfectly)
+        now = datetime.now(timezone.utc)
+        seconds_until_next_hour = 3600 - (now.minute * 60 + now.second) + 5
+        
+        print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {seconds_until_next_hour}s...")
+        time.sleep(max(0, seconds_until_next_hour))
 
 if __name__ == "__main__":
     main()
