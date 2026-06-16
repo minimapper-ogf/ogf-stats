@@ -11,10 +11,13 @@ import xml.etree.ElementTree as ET
 
 # --- CONFIGURATION ---
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "5.1"
+VERSION = "6.0"
 TARGET_DIR = Path("/var/www/ogfstats")
+CACHE_DIR = TARGET_DIR / "user_cache"
+USERS_DIR = TARGET_DIR / "users"
 
 VERSION_HISTORY = [
+    {"v": "6.0", "date": "2026-06-16", "note": "Individual user data :)"},
     {"v": "5.1", "date": "2026-06-15", "note": "Added automatic system dark/light theme support across the entire site."},
     {"v": "5.0", "date": "2026-03-25", "note": "More stats!!!!"},
     {"v": "4.1", "date": "2026-01-28", "note": "Fixed errors with slashes and commas in place names (stupid me thought that would not happen and I put it in a CSV)"},
@@ -29,19 +32,84 @@ VERSION_HISTORY = [
 
 # --- SHARED COMPONENTS ---
 NAV_BAR = f"""
-  <div class="nav">
-    <a href="index.html" id="nav_charts">Charts</a>
-    <a href="leaderboards.html" id="nav_leaderboards">Leaderboards</a>
-    <a href="territory.html" id="nav_territory">Territory Stats</a>
-    <a href="version.html" id="nav_version">v{VERSION}</a>
-  </div>
+    <div class="nav">
+        <a href="/index.html" id="nav_charts">Charts</a>
+        <a href="/leaderboards.html" id="nav_leaderboards">Leaderboards</a>
+        <a href="/territory.html" id="nav_territory">Territory Stats</a>
+        <a href="/version.html" id="nav_version">v{VERSION}</a>
+        <div style="margin-left:12px; display:flex; align-items:center; position:relative;">
+            <input id="siteSearch" placeholder="Search users..." style="padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:var(--input-bg, #fff); color:var(--text-main); width:260px;" autocomplete="off" />
+            <div id="searchSuggestions" style="display:none; position:absolute; top:42px; right:0; width:320px; max-height:360px; overflow:auto; background:var(--bg-card); border:1px solid var(--border-color); box-shadow:0 8px 24px rgba(0,0,0,0.15); border-radius:10px; padding:8px; z-index:2000;"></div>
+        </div>
+    </div>
+    <script>
+        // Enhanced search: show suggestion cards, dark-friendly
+        (function(){{
+            let usersIndex = null;
+            async function loadIndex(){{
+                if(usersIndex) return usersIndex;
+                try{{
+                    const resp = await fetch('/users/index.json', {{ cache: 'no-store' }});
+                    usersIndex = await resp.json();
+                }}catch(e){{ usersIndex = []; }}
+                return usersIndex;
+            }}
+
+            function renderSuggestions(list, q){{
+                const cont = document.getElementById('searchSuggestions');
+                if(!cont) return;
+                if(!list || list.length === 0){{ cont.style.display = 'none'; cont.innerHTML = ''; return; }}
+                cont.innerHTML = list.slice(0,12).map(u => `
+                    <div class="ss-card" style="padding:8px; border-radius:8px; margin-bottom:6px; cursor:pointer; background:var(--bg-card); border:1px solid var(--border-color);">
+                      <div style="font-weight:700; color:var(--text-main);">${{u.user}}</div>
+                      <div style="font-size:12px; color:var(--text-muted);">UID: ${{u.uid}}</div>
+                    </div>
+                `).join('');
+                // attach click handlers
+                Array.from(cont.children).forEach((el,i)=>{{ el.addEventListener('click', ()=>{{ window.location = `/users/${{list[i].uid}}.html`; }}); }});
+                cont.style.display = 'block';
+            }}
+
+            async function doSuggest(q){{
+                if(!q){{ renderSuggestions([], q); return; }}
+                const idx = await loadIndex();
+                const low = q.toLowerCase();
+                const matched = idx.filter(u => (u.user || '').toLowerCase().includes(low)).slice(0,50);
+                renderSuggestions(matched, q);
+            }}
+
+            async function doSearch(q){{
+                if(!q) return;
+                const idx = await loadIndex();
+                const found = idx.find(u => (u.user||'').toLowerCase() === q.toLowerCase());
+                if(found) window.location = `/users/${{found.uid}}.html`;
+            }}
+
+            const input = document.getElementById('siteSearch');
+            const suggestBox = document.getElementById('searchSuggestions');
+            if(input){{
+                let timer = null;
+                input.addEventListener('input', function(e){{
+                    clearTimeout(timer);
+                    const v = this.value.trim();
+                    timer = setTimeout(()=> doSuggest(v), 160);
+                }});
+                input.addEventListener('keydown', function(e){{
+                    if(e.key === 'Enter') return doSearch(this.value.trim());
+                    if(e.key === 'Escape') {{ suggestBox.style.display = 'none'; }}
+                }});
+                // hide when clicking outside
+                document.addEventListener('click', function(ev){{ if(!ev.target.closest('#searchSuggestions') && !ev.target.closest('#siteSearch')) {{ suggestBox.style.display = 'none'; }} }});
+            }}
+        }})();
+    </script>
 """
 
 GOOGLE_BLOCK = """
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-7BV9Y2QVPZ"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
-  function gtag(){{dataLayer.push(arguments);}}
+  function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
   gtag('config', 'G-7BV9Y2QVPZ');
 </script>
@@ -105,17 +173,17 @@ STYLE_BLOCK = """
   </style>
 """
 
-# --- 1. INDEX.HTML ---
-INDEX_HTML = f"""<!DOCTYPE html>
+# --- 1. INDEX.HTML (Removed 'f' prefix) ---
+INDEX_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" /><title>OGFStats - Dashboard</title>
-  {GOOGLE_BLOCK}
-  {STYLE_BLOCK}
+  {{GOOGLE_BLOCK}}
+  {{STYLE_BLOCK}}
   <script src="https://code.highcharts.com/highcharts.js"></script>
 </head>
 <body>
-  {NAV_BAR}
+  {{NAV_BAR}}
   <div class="wrap">
     <h1>Mapping Activity</h1>
     <p class="meta" id="updateTime">Loading...</p>
@@ -172,88 +240,88 @@ INDEX_HTML = f"""<!DOCTYPE html>
     let rawData = null;
     let mode = 'hourly';
     let barMetric = 'objects';
-    let sortDirections = {{}};
+    let sortDirections = {};
 
     // Let Highcharts adjust text colors and elements naturally
-    Highcharts.setOptions({{
-        chart: {{ backgroundColor: 'transparent' }}
-    }});
+    Highcharts.setOptions({
+        chart: { backgroundColor: 'transparent' }
+    });
 
-    function setMode(m) {{
+    function setMode(m) {
         mode = m;
         document.getElementById('btnHourly').classList.toggle('active', m === 'hourly');
         document.getElementById('btnDaily').classList.toggle('active', m === 'daily');
         renderTrend();
-    }}
+    }
 
-    function setBarMetric(m) {{
+    function setBarMetric(m) {
         barMetric = m;
         document.getElementById('btnBarObjs').classList.toggle('active', m === 'objects');
         document.getElementById('btnBarEdits').classList.toggle('active', m === 'count');
         renderBar();
-    }}
+    }
 
-    function renderTrend() {{
+    function renderTrend() {
         const entries = rawData[mode];
         const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
-        Highcharts.chart('chartDiff', {{
-            chart: {{ type: 'column', zoomType: 'x' }},
-            title: {{ text: 'Changesets', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ type: 'datetime', crosshair: true }},
-            yAxis: {{ title: {{ text: 'Count' }} }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
-            series: [{{ name: 'Changesets', data: diffSeries, color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
+        Highcharts.chart('chartDiff', {
+            chart: { type: 'column', zoomType: 'x' },
+            title: { text: 'Changesets', align: 'left', style: { fontWeight: 'bold' } },
+            xAxis: { type: 'datetime', crosshair: true },
+            yAxis: { title: { text: 'Count' } },
+            tooltip: { shared: true, intersect: false },
+            plotOptions: { column: { stickyTracking: true, borderWidth: 0 } },
+            series: [{ name: 'Changesets', data: diffSeries, color: '#007bff' }],
+            credits: { enabled: false }
+        });
 
         const idSeries = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
-        Highcharts.chart('chartID', {{
-            chart: {{ type: 'line', zoomType: 'x' }},
-            title: {{ text: 'ID History', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ type: 'datetime', crosshair: true }},
-            yAxis: {{ title: {{ text: 'ID' }}, startOnTick: false, endOnTick: false }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ line: {{ stickyTracking: true }} }},
-            series: [{{ name: 'Latest ID', data: idSeries, color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
-    }}
+        Highcharts.chart('chartID', {
+            chart: { type: 'line', zoomType: 'x' },
+            title: { text: 'ID History', align: 'left', style: { fontWeight: 'bold' } },
+            xAxis: { type: 'datetime', crosshair: true },
+            yAxis: { title: { text: 'ID' }, startOnTick: false, endOnTick: false },
+            tooltip: { shared: true, intersect: false },
+            plotOptions: { line: { stickyTracking: true } },
+            series: [{ name: 'Latest ID', data: idSeries, color: '#007bff' }],
+            credits: { enabled: false }
+        });
+    }
 
-    function renderBar() {{
+    function renderBar() {
         let sorted = [...rawData.monthly_leaderboard].sort((a,b) => b[barMetric] - a[barMetric]).slice(0, 20);
-        Highcharts.chart('userBarChart', {{
-            chart: {{ type: 'column' }},
-            title: {{ text: 'User Ranking', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ categories: sorted.map(u => u.user), crosshair: true }},
-            yAxis: {{ title: {{ text: barMetric === 'count' ? 'Edits' : 'Objects' }} }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
-            series: [{{ name: barMetric === 'count' ? 'Edits' : 'Objects Changed', data: sorted.map(u => u[barMetric]), color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
-    }}
+        Highcharts.chart('userBarChart', {
+            chart: { type: 'column' },
+            title: { text: 'User Ranking', align: 'left', style: { fontWeight: 'bold' } },
+            xAxis: { categories: sorted.map(u => u.user), crosshair: true },
+            yAxis: { title: { text: barMetric === 'count' ? 'Edits' : 'Objects' } },
+            tooltip: { shared: true, intersect: false },
+            plotOptions: { column: { stickyTracking: true, borderWidth: 0 } },
+            series: [{ name: barMetric === 'count' ? 'Edits' : 'Objects Changed', data: sorted.map(u => u[barMetric]), color: '#007bff' }],
+            credits: { enabled: false }
+        });
+    }
 
-    function sortRows(tableId, colIndex) {{
+    function sortRows(tableId, colIndex) {
         const table = document.getElementById(tableId);
         const tbody = table.tBodies[0];
         const rows = Array.from(tbody.rows);
         const sortKey = tableId + colIndex;
         sortDirections[sortKey] = !sortDirections[sortKey];
         const ascending = sortDirections[sortKey];
-        const sortedRows = rows.sort((a, b) => {{
+        const sortedRows = rows.sort((a, b) => {
             const valA = a.cells[colIndex].innerText;
             const valB = b.cells[colIndex].innerText;
             const numA = parseFloat(valA);
             const numB = parseFloat(valB);
             if (!isNaN(numA) && !isNaN(numB)) return ascending ? numA - numB : numB - numA;
             return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        }});
+        });
         tbody.append(...sortedRows);
-    }}
+    }
 
-    async function load() {{
-        const resp = await fetch('data.json', {{ cache: 'no-store' }});
+    async function load() {
+        const resp = await fetch('data.json', { cache: 'no-store' });
         rawData = await resp.json();
         document.getElementById('updateTime').innerText = "Last Sync: " + rawData.last_month_update;
 
@@ -261,44 +329,44 @@ INDEX_HTML = f"""<!DOCTYPE html>
         const mapperWeekly = (rawData.weekly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
         const mapperMonthly = (rawData.monthly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
 
-        Highcharts.chart('mapperChart', {{
-            chart: {{ type: 'line', zoomType: 'x' }},
-            title: {{ text: 'Unique Mappers (Rolling)', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ type: 'datetime', crosshair: true }},
-            yAxis: {{ title: {{ text: 'Unique Users' }} }},
-            tooltip: {{ shared: true, crosshair: true }},
+        Highcharts.chart('mapperChart', {
+            chart: { type: 'line', zoomType: 'x' },
+            title: { text: 'Unique Mappers (Rolling)', align: 'left', style: { fontWeight: 'bold' } },
+            xAxis: { type: 'datetime', crosshair: true },
+            yAxis: { title: { text: 'Unique Users' } },
+            tooltip: { shared: true, crosshairs: true },
             series: [
-                {{ name: 'Daily Unique', data: mapperDaily, color: '#007bff' }},
-                {{ name: 'Weekly Unique', data: mapperWeekly, color: '#28a745', visible: false }},
-                {{ name: 'Monthly Unique', data: mapperMonthly, color: '#dc3545', visible: false }}
+                { name: 'Daily Unique', data: mapperDaily, color: '#007bff' },
+                { name: 'Weekly Unique', data: mapperWeekly, color: '#28a745', visible: false },
+                { name: 'Monthly Unique', data: mapperMonthly, color: '#dc3545', visible: false }
             ],
-            credits: {{ enabled: false }}
-        }});
+            credits: { enabled: false }
+        });
 
         const tbody = document.querySelector("#deltaTable tbody");
         const sorted = [...rawData.monthly_leaderboard].sort((a,b) => b.objects - a.objects).slice(0, 15);
         tbody.innerHTML = sorted.map(u =>
-            `<tr><td>${{u.user}}</td><td>${{u.d_today || 0}}</td><td>${{u.d_week || 0}}</td><td>${{u.objects}}</td></tr>`
+            `<tr><td>${u.user}</td><td>${u.d_today || 0}</td><td>${u.d_week || 0}</td><td>${u.objects}</td></tr>`
         ).join('');
 
         renderTrend();
         renderBar();
-    }}
+    }
     load();
   </script>
 </body></html>"""
 
-# --- 2. LEADERBOARDS.HTML ---
-LEADERBOARD_HTML = f"""<!DOCTYPE html>
+# --- 2. LEADERBOARDS.HTML (Removed 'f' prefix) ---
+LEADERBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" /><title>OGFStats - Leaderboards</title>
-  {GOOGLE_BLOCK}
-  {STYLE_BLOCK}
+  {{GOOGLE_BLOCK}}
+  {{STYLE_BLOCK}}
   <script src="https://code.highcharts.com/highcharts.js"></script>
 </head>
 <body>
-  {NAV_BAR}
+  {{NAV_BAR}}
   <div class="wrap">
     <h1>User Leaderboards</h1>
 
@@ -316,57 +384,57 @@ LEADERBOARD_HTML = f"""<!DOCTYPE html>
 
   <script>
     document.getElementById('nav_leaderboards').classList.add('active');
-    let sortDirections = {{}};
+    let sortDirections = {};
 
-    Highcharts.setOptions({{
-        chart: {{ backgroundColor: 'transparent' }}
-    }});
+    Highcharts.setOptions({
+        chart: { backgroundColor: 'transparent' }
+    });
 
-    function renderFullChart(users) {{
+    function renderFullChart(users) {
         const sorted = [...users].sort((a,b) => b.objects - a.objects);
-        Highcharts.chart('fullUserChart', {{
-            chart: {{ type: 'column' }},
-            title: {{ text: 'Full Distribution (Linear)', align: 'left', style: {{ fontWeight: 'bold' }} }},
-            xAxis: {{ categories: sorted.map(u => u.user), labels: {{ enabled: false }}, crosshair: true }},
-            yAxis: {{ title: {{ text: 'Objects Changed' }} }},
-            tooltip: {{ shared: true, intersect: false }},
-            plotOptions: {{ column: {{ stickyTracking: true, borderWidth: 0 }} }},
-            series: [{{ name: 'Objects', data: sorted.map(u => u.objects), color: '#007bff' }}],
-            credits: {{ enabled: false }}
-        }});
-    }}
+        Highcharts.chart('fullUserChart', {
+            chart: { type: 'column' },
+            title: { text: 'Full Distribution (Linear)', align: 'left', style: { fontWeight: 'bold' } },
+            xAxis: { categories: sorted.map(u => u.user), labels: { enabled: false }, crosshair: true },
+            yAxis: { title: { text: 'Objects Changed' } },
+            tooltip: { shared: true, intersect: false },
+            plotOptions: { column: { stickyTracking: true, borderWidth: 0 } },
+            series: [{ name: 'Objects', data: sorted.map(u => u.objects), color: '#007bff' }],
+            credits: { enabled: false }
+        });
+    }
 
-    function fillTable(id, list) {{
+    function fillTable(id, list) {
         if (!list) return;
-        document.querySelector(`#${{id}} tbody`).innerHTML = list.map(u => `<tr><td>${{u.user}}</td><td>${{u.uid}}</td><td>${{u.count}}</td><td>${{u.objects}}</td></tr>`).join('');
-    }}
+        document.querySelector(`#${id} tbody`).innerHTML = list.map(u => `<tr><td>${u.user}</td><td>${u.uid}</td><td>${u.count}</td><td>${u.objects}</td></tr>`).join('');
+    }
 
-    function sortRows(tableId, colIndex) {{
+    function sortRows(tableId, colIndex) {
         const table = document.getElementById(tableId);
         const tbody = table.tBodies[0];
         const rows = Array.from(tbody.rows);
         const sortKey = tableId + colIndex;
         sortDirections[sortKey] = !sortDirections[sortKey];
         const ascending = sortDirections[sortKey];
-        const sortedRows = rows.sort((a, b) => {{
+        const sortedRows = rows.sort((a, b) => {
             const valA = a.cells[colIndex].innerText;
             const valB = b.cells[colIndex].innerText;
             const numA = parseFloat(valA);
             const numB = parseFloat(valB);
             if (!isNaN(numA) && !isNaN(numB)) return ascending ? numA - numB : numB - numA;
             return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        }});
+        });
         tbody.append(...sortedRows);
-    }}
+    }
 
-    async function load() {{
-        const resp = await fetch('data.json', {{ cache: 'no-store' }});
+    async function load() {
+        const resp = await fetch('data.json', { cache: 'no-store' });
         const data = await resp.json();
         renderFullChart(data.monthly_leaderboard || []);
         fillTable('hourlyTable', data.hourly_leaderboards?.slice(-1)[0]?.leaderboard || []);
         fillTable('dailyTable', data.daily_leaderboard || []);
         fillTable('monthlyTable', data.monthly_leaderboard || []);
-    }}
+    }
     load();
   </script>
 </body></html>"""
@@ -413,13 +481,42 @@ def fetch_recent_changesets(lookback_hours=2):
     try:
         with urlopen(req, timeout=20) as resp:
             root = ET.fromstring(resp.read())
-        return [{
-            "id": cs.get("id"),
-            "user": cs.get("user"),
-            "uid": cs.get("uid"),
-            "changes_count": int(cs.get("changes_count", "0")),
-            "ts": cs.get("created_at")
-        } for cs in root.findall("changeset")]
+
+        out = []
+        for cs in root.findall("changeset"):
+            tags = {t.get('k'): t.get('v') for t in cs.findall('tag')}
+            try:
+                min_lat = float(cs.get('min_lat')) if cs.get('min_lat') else None
+                min_lon = float(cs.get('min_lon')) if cs.get('min_lon') else None
+                max_lat = float(cs.get('max_lat')) if cs.get('max_lat') else None
+                max_lon = float(cs.get('max_lon')) if cs.get('max_lon') else None
+            except:
+                min_lat = min_lon = max_lat = max_lon = None
+
+            lat = None; lon = None
+            if min_lat is not None and max_lat is not None:
+                lat = (min_lat + max_lat) / 2.0
+            if min_lon is not None and max_lon is not None:
+                lon = (min_lon + max_lon) / 2.0
+
+            out.append({
+                "id": cs.get("id"),
+                "user": cs.get("user"),
+                "uid": cs.get("uid"),
+                "changes_count": int(cs.get("changes_count", "0")),
+                "created_at": cs.get("created_at"),
+                "closed_at": cs.get("closed_at"),
+                "comment": tags.get('comment',''),
+                "created_by": tags.get('created_by',''),
+                "source": tags.get('source',''),
+                "min_lat": min_lat,
+                "min_lon": min_lon,
+                "max_lat": max_lat,
+                "max_lon": max_lon,
+                "lat": lat,
+                "lon": lon
+            })
+        return out
     except Exception as e:
         print(f"Fetch error: {e}"); return []
 
@@ -485,14 +582,87 @@ def run_update(data_file, now):
 
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
-
+    # write main data file
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
+    # ensure cache directories
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        USERS_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    # Append new entries to daily cache and per-user files
+    if new_entries:
+        dayfile = CACHE_DIR / (now.strftime('%Y-%m-%d') + '.json')
+        daily = []
+        if dayfile.exists():
+            try: daily = json.loads(dayfile.read_text(encoding='utf-8'))
+            except: daily = []
+        daily.extend(new_entries)
+        dayfile.write_text(json.dumps(daily, indent=2), encoding='utf-8')
+
+        # per-user files
+        for e in new_entries:
+            try:
+                uid = str(e.get('uid') or 'unknown')
+                userfile = USERS_DIR / f"{uid}.json"
+                ulist = []
+                if userfile.exists():
+                    try: ulist = json.loads(userfile.read_text(encoding='utf-8'))
+                    except: ulist = []
+                # include display name for index purposes
+                entry = {k: e.get(k) for k in ['id','created_at','closed_at','comment','created_by','source','changes_count','lat','lon']}
+                entry['user'] = e.get('user')
+                entry['uid'] = uid
+                ulist.append(entry)
+                userfile.write_text(json.dumps(ulist, indent=2), encoding='utf-8')
+            except Exception:
+                continue
+
+        # rebuild small users index
+        try:
+            index = []
+            for f in USERS_DIR.glob('*.json'):
+                try:
+                    uid = f.stem
+                    lst = json.loads(f.read_text(encoding='utf-8'))
+                    if not lst: continue
+                    index.append({'uid': uid, 'user': lst[-1].get('user','')})
+                except:
+                    continue
+            (USERS_DIR / 'index.json').write_text(json.dumps(index, indent=2), encoding='utf-8')
+        except Exception:
+            pass
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--once', action='store_true', help='Run a single update and exit (good for testing)')
+    parser.add_argument('--outdir', type=str, default=None, help='Override output directory (e.g. ./site)')
+    args = parser.parse_args()
+
+    # If running one-shot with no explicit outdir, default to ./site
+    if args.once and not args.outdir:
+        args.outdir = str(Path(__file__).parent.joinpath('site').resolve())
+
+    # Allow overriding the default TARGET_DIR for local testing
+    if args.outdir:
+        out = Path(args.outdir).resolve()
+        # override module-level targets so imported generators use them
+        global TARGET_DIR, CACHE_DIR, USERS_DIR
+        TARGET_DIR = out
+        CACHE_DIR = TARGET_DIR / "user_cache"
+        USERS_DIR = TARGET_DIR / "users"
+
     # 1. Initialization and Page Writing
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
-    pages = {"index.html": INDEX_HTML, "leaderboards.html": LEADERBOARD_HTML, "version.html": VERSION_HTML}
-    for f, c in pages.items(): 
+    
+    # Safely swap variables using replace instead of tricky f-string nesting
+    final_index = INDEX_HTML.replace("{{GOOGLE_BLOCK}}", GOOGLE_BLOCK).replace("{{STYLE_BLOCK}}", STYLE_BLOCK).replace("{{NAV_BAR}}", NAV_BAR)
+    final_leaderboard = LEADERBOARD_HTML.replace("{{GOOGLE_BLOCK}}", GOOGLE_BLOCK).replace("{{STYLE_BLOCK}}", STYLE_BLOCK).replace("{{NAV_BAR}}", NAV_BAR)
+    
+    pages = {"index.html": final_index, "leaderboards.html": final_leaderboard, "version.html": VERSION_HTML}
+    for f, c in pages.items():
         (TARGET_DIR / f).write_text(c, encoding='utf-8')
 
     data_file = TARGET_DIR / "data.json"
@@ -511,13 +681,34 @@ def main():
 
     print(f"Starting OGFStats v{VERSION}...")
 
+    # If one-shot, perform a single update to data and generate pages in ./site (or overridden outdir)
+    if args.once:
+        now = datetime.now(timezone.utc)
+        try:
+            import generate_user_pages
+            import sys
+            
+            # Save the old args, clear them so the sub-script doesn't throw a fit
+            old_argv = sys.argv
+            sys.argv = [sys.argv[0], '--outdir', str(TARGET_DIR)] 
+            
+            generate_user_pages.main()
+            
+            # Restore them (optional but good practice)
+            sys.argv = old_argv
+            
+            print("✓ user pages generated (one-shot)")
+        except Exception as e:
+            print(f"Error generating user pages: {e}")
+
+    # Otherwise run as continuous hourly loop
     while True:
         try:
             now = datetime.now(timezone.utc)
-            
+
             # 2. Main Changeset Update
             run_update(data_file, now)
-            
+
             # 3. Daily Task: Run Territory Stats (ts.py) at 12 AM
             current_day = now.strftime("%Y-%m-%d")
             if now.hour == 0 and last_ts_run_day != current_day:
@@ -529,6 +720,13 @@ def main():
                     print("✓ ts.py completed successfully.")
                 except Exception as e:
                     print(f"❌ Error running ts.py: {e}")
+                # Also generate per-user pages after ts.py (import in-process so it uses TARGET_DIR)
+                try:
+                    import generate_user_pages
+                    generate_user_pages.main()
+                    print("✓ generate_user_pages completed successfully.")
+                except Exception as e:
+                    print(f"❌ Error running generate_user_pages: {e}")
 
         except Exception as e:
             print(f"Critical Loop error: {e}")
@@ -536,7 +734,7 @@ def main():
         # 4. Precision Sleep (Prevents Timing Drift so it hits midnight perfectly)
         now = datetime.now(timezone.utc)
         seconds_until_next_hour = 3600 - (now.minute * 60 + now.second) + 5
-        
+
         print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {seconds_until_next_hour}s...")
         time.sleep(max(0, seconds_until_next_hour))
 
