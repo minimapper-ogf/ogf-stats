@@ -43,7 +43,6 @@ NAV_BAR = f"""
         </div>
     </div>
     <script>
-        // Enhanced search: show suggestion cards, dark-friendly
         (function(){{
             let usersIndex = null;
             async function loadIndex(){{
@@ -65,7 +64,6 @@ NAV_BAR = f"""
                       <div style="font-size:12px; color:var(--text-muted);">UID: ${{u.uid}}</div>
                     </div>
                 `).join('');
-                // attach click handlers
                 Array.from(cont.children).forEach((el,i)=>{{ el.addEventListener('click', ()=>{{ window.location = `/users/${{list[i].uid}}.html`; }}); }});
                 cont.style.display = 'block';
             }}
@@ -98,7 +96,6 @@ NAV_BAR = f"""
                     if(e.key === 'Enter') return doSearch(this.value.trim());
                     if(e.key === 'Escape') {{ suggestBox.style.display = 'none'; }}
                 }});
-                // hide when clicking outside
                 document.addEventListener('click', function(ev){{ if(!ev.target.closest('#searchSuggestions') && !ev.target.closest('#siteSearch')) {{ suggestBox.style.display = 'none'; }} }});
             }}
         }})();
@@ -117,7 +114,6 @@ GOOGLE_BLOCK = """
 
 STYLE_BLOCK = """
   <style>
-    /* Default Light Theme Variables */
     :root {
       --primary: #007bff;
       --bg-body: #fafafa;
@@ -130,7 +126,6 @@ STYLE_BLOCK = """
       --btn-border: #dddddd;
     }
 
-    /* Automatic Dark Theme Overrides */
     @media (prefers-color-scheme: dark) {
       :root {
         --bg-body: #121212;
@@ -173,7 +168,6 @@ STYLE_BLOCK = """
   </style>
 """
 
-# --- 1. INDEX.HTML (Removed 'f' prefix) ---
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -242,7 +236,6 @@ INDEX_HTML = """<!DOCTYPE html>
     let barMetric = 'objects';
     let sortDirections = {};
 
-    // Let Highcharts adjust text colors and elements naturally
     Highcharts.setOptions({
         chart: { backgroundColor: 'transparent' }
     });
@@ -356,7 +349,6 @@ INDEX_HTML = """<!DOCTYPE html>
   </script>
 </body></html>"""
 
-# --- 2. LEADERBOARDS.HTML (Removed 'f' prefix) ---
 LEADERBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -439,7 +431,6 @@ LEADERBOARD_HTML = """<!DOCTYPE html>
   </script>
 </body></html>"""
 
-# --- 3. VERSION.HTML ---
 VERSION_HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8" /><title>Version History</title>{GOOGLE_BLOCK}{STYLE_BLOCK}</head>
@@ -470,7 +461,7 @@ def get_initial_data():
     return {
         "hourly": [], "daily": [], "hourly_leaderboards": [],
         "rolling24": [], "monthly_store": [], "monthly_leaderboard": [],
-        "last_month_update": "", "seen_ids": [],
+        "last_month_update": "", "last_daily_run_day": "", "seen_ids": [],
         "daily_mapper_counts": [], "weekly_mapper_counts": [], "monthly_mapper_counts": []
     }
 
@@ -506,6 +497,8 @@ def fetch_recent_changesets(lookback_hours=2):
                 "changes_count": int(cs.get("changes_count", "0")),
                 "created_at": cs.get("created_at"),
                 "closed_at": cs.get("closed_at"),
+                # FIX: Explicitly pass "ts" down so monthly filtering condition handles it properly
+                "ts": cs.get("created_at"),
                 "comment": tags.get('comment',''),
                 "created_by": tags.get('created_by',''),
                 "source": tags.get('source',''),
@@ -531,14 +524,16 @@ def tally_users(entries):
 def run_update(data_file, now):
     data = get_initial_data()
     if data_file.exists():
-        try: data = json.loads(data_file.read_text(encoding="utf-8"))
+        try:
+            loaded = json.loads(data_file.read_text(encoding="utf-8"))
+            data.update(loaded)
         except: pass
 
     raw_entries = fetch_recent_changesets()
     seen = set(data.get("seen_ids", []))
     new_entries = [e for e in raw_entries if e["id"] not in seen]
     for e in new_entries: seen.add(e["id"])
-    data["seen_ids"] = list(seen)[-3000:]
+    data["seen_ids"] = list(seen)[-5000:]
 
     bucket_ts = now.replace(minute=0, second=0, microsecond=0)
     ts_str = bucket_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -556,13 +551,13 @@ def run_update(data_file, now):
 
     data.setdefault("monthly_store", []).extend(new_entries)
     this_month = now.strftime("%Y-%m")
-    data["monthly_store"] = [e for e in data["monthly_store"] if "ts" in e and e["ts"].startswith(this_month)]
+    data["monthly_store"] = [e for e in data["monthly_store"] if e.get("ts", "").startswith(this_month)]
 
     day_ago = (now - timedelta(days=1)).isoformat()
     week_ago = (now - timedelta(days=7)).isoformat()
 
-    today_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= day_ago])
-    week_list = tally_users([e for e in data["monthly_store"] if e["ts"] >= week_ago])
+    today_list = tally_users([e for e in data["monthly_store"] if e.get("ts", "") >= day_ago])
+    week_list = tally_users([e for e in data["monthly_store"] if e.get("ts", "") >= week_ago])
     full_month = tally_users(data["monthly_store"])
 
     data.setdefault("daily_mapper_counts", []).append({"date": ts_str, "count": len(today_list)})
@@ -582,17 +577,14 @@ def run_update(data_file, now):
 
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
-    # write main data file
     data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    # ensure cache directories
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         USERS_DIR.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
 
-    # Append new entries to daily cache and per-user files
     if new_entries:
         dayfile = CACHE_DIR / (now.strftime('%Y-%m-%d') + '.json')
         daily = []
@@ -602,7 +594,6 @@ def run_update(data_file, now):
         daily.extend(new_entries)
         dayfile.write_text(json.dumps(daily, indent=2), encoding='utf-8')
 
-        # per-user files
         for e in new_entries:
             try:
                 uid = str(e.get('uid') or 'unknown')
@@ -611,7 +602,6 @@ def run_update(data_file, now):
                 if userfile.exists():
                     try: ulist = json.loads(userfile.read_text(encoding='utf-8'))
                     except: ulist = []
-                # include display name for index purposes
                 entry = {k: e.get(k) for k in ['id','created_at','closed_at','comment','created_by','source','changes_count','lat','lon']}
                 entry['user'] = e.get('user')
                 entry['uid'] = uid
@@ -620,10 +610,10 @@ def run_update(data_file, now):
             except Exception:
                 continue
 
-        # rebuild small users index
         try:
             index = []
             for f in USERS_DIR.glob('*.json'):
+                if f.name == 'index.json': continue
                 try:
                     uid = f.stem
                     lst = json.loads(f.read_text(encoding='utf-8'))
@@ -641,86 +631,67 @@ def main():
     parser.add_argument('--outdir', type=str, default=None, help='Override output directory (e.g. ./site)')
     args = parser.parse_args()
 
-    # If running one-shot with no explicit outdir, default to ./site
     if args.once and not args.outdir:
         args.outdir = str(Path(__file__).parent.joinpath('site').resolve())
 
-    # Allow overriding the default TARGET_DIR for local testing
     if args.outdir:
         out = Path(args.outdir).resolve()
-        # override module-level targets so imported generators use them
         global TARGET_DIR, CACHE_DIR, USERS_DIR
         TARGET_DIR = out
         CACHE_DIR = TARGET_DIR / "user_cache"
         USERS_DIR = TARGET_DIR / "users"
 
-    # 1. Initialization and Page Writing
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Safely swap variables using replace instead of tricky f-string nesting
+
     final_index = INDEX_HTML.replace("{{GOOGLE_BLOCK}}", GOOGLE_BLOCK).replace("{{STYLE_BLOCK}}", STYLE_BLOCK).replace("{{NAV_BAR}}", NAV_BAR)
     final_leaderboard = LEADERBOARD_HTML.replace("{{GOOGLE_BLOCK}}", GOOGLE_BLOCK).replace("{{STYLE_BLOCK}}", STYLE_BLOCK).replace("{{NAV_BAR}}", NAV_BAR)
-    
+
     pages = {"index.html": final_index, "leaderboards.html": final_leaderboard, "version.html": VERSION_HTML}
     for f, c in pages.items():
         (TARGET_DIR / f).write_text(c, encoding='utf-8')
 
     data_file = TARGET_DIR / "data.json"
-    
-    # Track the last day ts.py was run to prevent multiple runs if script restarts
-    last_ts_run_day = None
 
-    # Load existing data immediately to populate last_ts_run_day if possible
+    # FIX: Isolate daily tasks tracking variable from loop updates
+    last_ts_run_day = None
     if data_file.exists():
         try:
             temp_data = json.loads(data_file.read_text(encoding="utf-8"))
-            if "last_month_update" in temp_data:
-                last_ts_run_day = temp_data["last_month_update"].split('T')[0]
+            last_ts_run_day = temp_data.get("last_daily_run_day")
         except:
             pass
 
     print(f"Starting OGFStats v{VERSION}...")
 
-    # If one-shot, perform a single update to data and generate pages in ./site (or overridden outdir)
     if args.once:
         now = datetime.now(timezone.utc)
+        run_update(data_file, now)
         try:
             import generate_user_pages
-            import sys
-            
-            # Save the old args, clear them so the sub-script doesn't throw a fit
             old_argv = sys.argv
-            sys.argv = [sys.argv[0], '--outdir', str(TARGET_DIR)] 
-            
+            sys.argv = [sys.argv[0], '--outdir', str(TARGET_DIR)]
             generate_user_pages.main()
-            
-            # Restore them (optional but good practice)
             sys.argv = old_argv
-            
             print("✓ user pages generated (one-shot)")
         except Exception as e:
             print(f"Error generating user pages: {e}")
+        return
 
-    # Otherwise run as continuous hourly loop
     while True:
         try:
             now = datetime.now(timezone.utc)
-
-            # 2. Main Changeset Update
             run_update(data_file, now)
 
-            # 3. Daily Task: Run Territory Stats (ts.py) at 12 AM
+            # FIX: Ensure checking "last_daily_run_day" tracks execution safely across machine restarts
             current_day = now.strftime("%Y-%m-%d")
             if now.hour == 0 and last_ts_run_day != current_day:
-                print(f"Midnight detected ({current_day} 00:00). Running ts.py...")
+                print(f"Midnight hour detected ({current_day} 00:00). Running ts.py...")
                 try:
-                    # Runs ts.py and waits for it to finish
                     subprocess.run([sys.executable, "ts.py"], check=True)
-                    last_ts_run_day = current_day
                     print("✓ ts.py completed successfully.")
                 except Exception as e:
                     print(f"❌ Error running ts.py: {e}")
-                # Also generate per-user pages after ts.py (import in-process so it uses TARGET_DIR)
+
                 try:
                     import generate_user_pages
                     generate_user_pages.main()
@@ -728,13 +699,21 @@ def main():
                 except Exception as e:
                     print(f"❌ Error running generate_user_pages: {e}")
 
+                # Save the run indicator inside data.json explicitly
+                last_ts_run_day = current_day
+                if data_file.exists():
+                    try:
+                        f_data = json.loads(data_file.read_text(encoding="utf-8"))
+                        f_data["last_daily_run_day"] = current_day
+                        data_file.write_text(json.dumps(f_data, indent=2), encoding="utf-8")
+                    except:
+                        pass
+
         except Exception as e:
             print(f"Critical Loop error: {e}")
 
-        # 4. Precision Sleep (Prevents Timing Drift so it hits midnight perfectly)
         now = datetime.now(timezone.utc)
         seconds_until_next_hour = 3600 - (now.minute * 60 + now.second) + 5
-
         print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {seconds_until_next_hour}s...")
         time.sleep(max(0, seconds_until_next_hour))
 
