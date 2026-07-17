@@ -154,7 +154,7 @@ async function buildDashboard() {
     snapshot.sort((a,b) => a.territory.localeCompare(b.territory)).forEach((row, i) => {
         const name = row.territory;
         const tr = document.createElement('tr');
-        const shouldAutoLoad = i < 5;
+        const shouldAutoLoad = i < 0;
 
         tr.innerHTML = `<td><input type="checkbox" class="chk" data-name="${name}" data-rel="${row.rel}" ${shouldAutoLoad ? 'checked' : ''}></td><td>${name}</td>`;
         tr.onclick = (e) => {
