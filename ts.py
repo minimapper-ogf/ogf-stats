@@ -49,7 +49,9 @@ def fetch_admin_json():
 def load_owned_territories():
     with open(ADMIN_JSON, encoding="utf-8") as f:
         data = json.load(f)
-    return [t for t in data if t.get("status") == "owned" and t.get("rel")]
+    valid_statuses = {"owned", "collaborative", "collabrative"}
+    return [t for t in data if t.get("status") in valid_statuses and t.get("rel")]
+
 
 def run_overpass(rel_id):
     query = f'[out:json][timeout:900];relation({rel_id})->.rel;.rel map_to_area->.a;(node(area.a);way(area.a);relation(area.a););out count;.rel convert relation ::id = id(), name = t["name:en"] ? t["name:en"] : t["name"];out;'
