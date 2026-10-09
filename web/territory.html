@@ -51,7 +51,7 @@ csv('tdata/territory-latest.csv').then(function(d){
   document.getElementById('updateTime').textContent='Updated '+OGF.ago(snap[0]&&snap[0].timestamp);
   line=Highcharts.chart('line',{chart:{type:'line',zoomType:'x'},xAxis:{type:'datetime'},yAxis:{title:{text:'Count'}},legend:{enabled:false},tooltip:{shared:true,crosshairs:true},plotOptions:{series:{marker:{enabled:true,radius:2},turboThreshold:0}},series:[]});
   drawBars();
-  Promise.all(snap.slice().sort(function(a,b){return b.total-a.total}).slice(0,3).map(function(r){return toggle(r,true)})).then(function(){refresh();drawList()});
+  Promise.all(snap.slice().sort(function(a,b){return b.total-a.total}).slice(0,0).map(function(r){return toggle(r,true)})).then(function(){refresh();drawList()});
 }).catch(function(){document.getElementById('updateTime').textContent='Could not load data'});
 OGF.seg(document.getElementById('metricSeg'),function(v){metric=v;drawBars();line.series.slice().forEach(function(s){s.setData(series(s.options.id),false)});line.yAxis[0].setTitle({text:v});line.redraw()});
 OGF.seg(document.getElementById('sortSeg'),drawList);
