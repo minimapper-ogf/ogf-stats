@@ -1,0 +1,52 @@
+<!DOCTYPE html><html lang="en"><head><title>OGFStats</title><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/assets/favicon.svg">
+<script>try{var t=localStorage.getItem("ogf-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/assets/style.css?v=__V__">
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="/assets/meta.js?v=__V__"></script>
+<script src="/assets/app.js?v=__V__"></script></head>
+<body data-page="charts"><div class="wrap">
+<div class="page-head"><div><h1>Mapping Activity</h1><p class="sub">Live stats from OpenGeoFiction</p></div><span class="pill" id="updateTime">Loading…</span></div>
+<div class="stats" id="kpis"></div>
+<div class="grid">
+ <section class="card"><div class="card-head"><h2>Latest changeset ID</h2></div><div id="chartID" class="chart"></div></section>
+ <section class="card"><div class="card-head"><h2>Activity volume</h2><div class="seg" id="modeSeg"><button class="on" data-v="hourly">Hourly</button><button data-v="daily">Daily</button></div></div><div id="chartDiff" class="chart"></div></section>
+ <section class="card span"><div class="card-head"><h2>Unique mappers (rolling 24h / 7d / 30d)</h2></div><div id="mapperChart" class="chart"></div></section>
+ <section class="card"><div class="card-head"><h2>Top mappers this month</h2><div class="seg" id="metricSeg"><button class="on" data-v="objects">Objects</button><button data-v="count">Edits</button></div></div><div id="userBar" class="chart tall"></div></section>
+ <section class="card"><div class="card-head"><h2>User activity summary</h2></div><div id="deltaTable"></div></section>
+</div></div>
+<script>
+var S,mode='hourly',metric='objects';
+function daily(h){var m={};h.forEach(function(x){var d=x.timestamp.slice(0,10)+'T00:00:00Z';var r=m[d]=m[d]||{timestamp:d,changeset_id:0,change:0};r.change+=x.change||0;r.changeset_id=x.changeset_id});return Object.keys(m).map(function(k){return m[k]})}
+function pts(a,f){return a.map(function(d){return[Date.parse(d.timestamp||d.date),f(d)]})}
+function renderTrend(){
+  var e=mode==='daily'?(S.daily&&S.daily.length?S.daily:daily(S.hourly||[])):(S.hourly||[]);
+  Highcharts.chart('chartDiff',{chart:{type:'column',zoomType:'x'},xAxis:{type:'datetime',crosshair:true},yAxis:{title:{text:'Changesets'}},legend:{enabled:false},series:[{name:'Changesets',data:pts(e,function(d){return d.change||0})}]});
+  Highcharts.chart('chartID',{chart:{type:'areaspline',zoomType:'x'},xAxis:{type:'datetime',crosshair:true},yAxis:{title:{text:'ID'},startOnTick:false,endOnTick:false},legend:{enabled:false},plotOptions:{areaspline:{fillOpacity:.12,marker:{enabled:false}}},series:[{name:'Latest ID',data:pts(e,function(d){return Number(d.changeset_id)})}]});
+}
+function renderBar(){
+  var s=S.monthly_leaderboard.slice().sort(function(a,b){return b[metric]-a[metric]}).slice(0,15);
+  Highcharts.chart('userBar',{chart:{type:'bar'},xAxis:{categories:s.map(function(u){return u.user})},yAxis:{title:{text:metric==='count'?'Edits':'Objects'}},legend:{enabled:false},
+    plotOptions:{series:{cursor:'pointer',point:{events:{click:function(){location.href='/users/'+this.options.uid+'.html'}}}}},
+    series:[{name:metric==='count'?'Edits':'Objects',data:s.map(function(u){return{y:u[metric],uid:u.uid}})}]});
+}
+function last(a){return a&&a.length?a[a.length-1].count:0}
+OGF.getJSON('/stats.json').catch(function(){return OGF.getJSON('/data.json')}).then(function(d){
+  S=d;S.monthly_leaderboard=S.monthly_leaderboard||[];
+  document.getElementById('updateTime').textContent='Updated '+OGF.ago(S.last_month_update);
+  var cut=Date.now()-864e5,c24=(S.hourly||[]).filter(function(h){return Date.parse(h.timestamp)>=cut}).reduce(function(a,h){return a+(h.change||0)},0);
+  var lb=S.monthly_leaderboard,objs=lb.reduce(function(a,u){return a+u.objects},0),eds=lb.reduce(function(a,u){return a+u.count},0),top=lb.slice().sort(function(a,b){return b.objects-a.objects})[0];
+  var k=[['Changesets, 24h',OGF.num(c24),'last 24 hours'],['Mappers today',OGF.num(last(S.daily_mapper_counts)),'unique, rolling 24h'],['Mappers, 30 days',OGF.num(last(S.monthly_mapper_counts)),'unique, rolling'],
+    ['Objects this month',OGF.num(objs),OGF.num(eds)+' changesets'],['Top mapper',top?OGF.esc(top.user):'–',top?OGF.num(top.objects)+' objects':'']];
+  document.getElementById('kpis').innerHTML=k.map(function(x){return'<div class="stat"><div class="l">'+x[0]+'</div><div class="v">'+x[1]+'</div><div class="s">'+x[2]+'</div></div>'}).join('');
+  var m=function(a){return pts(a||[],function(d){return d.count})};
+  Highcharts.chart('mapperChart',{chart:{type:'line',zoomType:'x'},xAxis:{type:'datetime',crosshair:true},yAxis:{title:{text:'Unique users'},min:0},tooltip:{shared:true},plotOptions:{line:{marker:{enabled:false},lineWidth:2}},
+    series:[{name:'Daily (24h)',data:m(S.daily_mapper_counts)},{name:'Weekly (7d)',data:m(S.weekly_mapper_counts)},{name:'Monthly (30d)',data:m(S.monthly_mapper_counts)}]});
+  var rows=lb.slice().sort(function(a,b){return b.objects-a.objects}).slice(0,15).map(function(u,i){u._rank=i+1;return u}),mx=rows.length?rows[0].objects:0;
+  OGF.table(document.getElementById('deltaTable'),{rows:rows,sort:{key:'objects',dir:-1},columns:[{key:'_rank',label:'#',nosort:true},{key:'user',label:'Mapper',render:function(u){return OGF.userLink(u.uid,u.user)}},
+    {key:'d_today',label:'Today',num:true,render:function(u){return OGF.num(u.d_today)}},{key:'d_week',label:'Week',num:true,render:function(u){return OGF.num(u.d_week)}},{key:'objects',label:'Month',num:true,render:function(u){return OGF.bar(u.objects,mx)}}]});
+  renderTrend();renderBar();
+}).catch(function(e){document.getElementById('updateTime').textContent='Could not load data'});
+OGF.seg(document.getElementById('modeSeg'),function(v){mode=v;renderTrend()});
+OGF.seg(document.getElementById('metricSeg'),function(v){metric=v;renderBar()});
+</script></body></html>

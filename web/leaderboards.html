@@ -1,0 +1,31 @@
+<!DOCTYPE html><html lang="en"><head><title>OGFStats – Leaderboards</title><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/assets/favicon.svg">
+<script>try{var t=localStorage.getItem("ogf-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/assets/style.css?v=__V__">
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="/assets/meta.js?v=__V__"></script>
+<script src="/assets/app.js?v=__V__"></script></head>
+<body data-page="leaderboards"><div class="wrap">
+<div class="page-head"><div><h1>Leaderboards</h1><p class="sub">Most active mappers by objects changed</p></div><span class="pill" id="updateTime">Loading…</span></div>
+<div class="podium" id="podium"></div>
+<section class="card" style="margin-bottom:18px"><div class="card-head"><h2>Monthly distribution</h2></div><div id="dist" class="chart"></div></section>
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr))">
+ <section class="card"><div class="card-head"><h2>Hourly</h2></div><div id="tHourly"></div></section>
+ <section class="card"><div class="card-head"><h2>Daily (rolling 24h)</h2></div><div id="tDaily"></div></section>
+ <section class="card"><div class="card-head"><h2>Monthly</h2></div><div id="tMonthly"></div></section>
+</div></div>
+<script>
+function board(id,list){
+  var rows=(list||[]).slice().sort(function(a,b){return b.objects-a.objects}).map(function(u,i){u._rank=i+1;return u}),mx=rows.length?rows[0].objects:0;
+  OGF.table(document.getElementById(id),{rows:rows,sort:{key:'objects',dir:-1},columns:[{key:'_rank',label:'#',nosort:true},{key:'user',label:'User',render:function(u){return OGF.userLink(u.uid,u.user)}},
+    {key:'count',label:'Edits',num:true,render:function(u){return OGF.num(u.count)}},{key:'objects',label:'Objects',num:true,render:function(u){return OGF.bar(u.objects,mx)}}]});
+  return rows;
+}
+OGF.getJSON('/stats.json').catch(function(){return OGF.getJSON('/data.json')}).then(function(d){
+  document.getElementById('updateTime').textContent='Updated '+OGF.ago(d.last_month_update);
+  var hl=d.hourly_leaderboards||[];board('tHourly',hl.length?hl[hl.length-1].leaderboard:[]);board('tDaily',d.daily_leaderboard);
+  var m=board('tMonthly',d.monthly_leaderboard);
+  document.getElementById('podium').innerHTML=m.slice(0,3).map(function(u,i){return'<div class="pod p'+(i+1)+'"><div class="r">#'+(i+1)+' this month</div><div class="n">'+OGF.userLink(u.uid,u.user)+'</div><div class="r">'+OGF.num(u.objects)+' objects · '+OGF.num(u.count)+' edits</div></div>'}).join('');
+  Highcharts.chart('dist',{chart:{type:'column'},xAxis:{categories:m.map(function(u){return u.user}),labels:{enabled:false},crosshair:true},yAxis:{title:{text:'Objects changed'}},legend:{enabled:false},series:[{name:'Objects',data:m.map(function(u){return u.objects})}]});
+}).catch(function(){document.getElementById('updateTime').textContent='Could not load data'});
+</script></body></html>

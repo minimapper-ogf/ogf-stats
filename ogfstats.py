@@ -1,22 +1,33 @@
 import argparse
 import json
+import os
+import shutil
+import subprocess
 import sys
 import time
-import os
-import subprocess
+from bisect import bisect_left
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.request import urlopen, Request
 import xml.etree.ElementTree as ET
 
+import generate_user_pages
+from generate_user_pages import atomic_write
+
 # --- CONFIGURATION ---
+HERE = Path(__file__).resolve().parent
+WEB_DIR = HERE / "web"
 OGF_CHANGESETS_URL = "https://opengeofiction.net/api/0.6/changesets"
-VERSION = "6.0"
+VERSION = "7.0"
 TARGET_DIR = Path("/var/www/ogfstats")
 CACHE_DIR = TARGET_DIR / "user_cache"
 USERS_DIR = TARGET_DIR / "users"
+ROLLING_DAYS = 31          # how much raw changeset history is kept for rolling windows
+HISTORY_POINTS = 24 * 400  # hourly points kept for the rolling mapper series
+HOURLY_POINTS = 720
 
 VERSION_HISTORY = [
+    {"v": "7.0", "date": "2026-10-09", "note": "Site redesign with shared theme, light/dark toggle and better search. User pages now update automatically every hour. Rolling daily/weekly/monthly mapper counts no longer reset at the start of each month."},
     {"v": "6.0", "date": "2026-06-16", "note": "Individual user data :)"},
     {"v": "5.1", "date": "2026-06-15", "note": "Added automatic system dark/light theme support across the entire site."},
     {"v": "5.0", "date": "2026-03-25", "note": "More stats!!!!"},
@@ -30,432 +41,14 @@ VERSION_HISTORY = [
 ]
 
 
-# --- SHARED COMPONENTS ---
-NAV_BAR = f"""
-    <div class="nav">
-        <a href="/index.html" id="nav_charts">Charts</a>
-        <a href="/leaderboards.html" id="nav_leaderboards">Leaderboards</a>
-        <a href="/territory.html" id="nav_territory">Territory Stats</a>
-        <a href="/version.html" id="nav_version">v{VERSION}</a>
-        <div style="margin-left:12px; display:flex; align-items:center; position:relative;">
-            <input id="siteSearch" placeholder="Search users..." style="padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:var(--input-bg); color:var(--text-main); width:260px;" autocomplete="off" />
-            <div id="searchSuggestions" style="display:none; position:absolute; top:42px; right:0; width:320px; max-height:360px; overflow:auto; background:var(--bg-card); border:1px solid var(--border-color); box-shadow:0 8px 24px rgba(0,0,0,0.15); border-radius:10px; padding:8px; z-index:2000;"></div>
-        </div>
-    </div>
-    <script>
-        (function(){{
-            let usersIndex = null;
-            async function loadIndex(){{
-                if(usersIndex) return usersIndex;
-                try{{
-                    const resp = await fetch('/users/index.json', {{ cache: 'no-store' }});
-                    usersIndex = await resp.json();
-                }}catch(e){{ usersIndex = []; }}
-                return usersIndex;
-            }}
 
-            function renderSuggestions(list, q){{
-                const cont = document.getElementById('searchSuggestions');
-                if(!cont) return;
-                if(!list || list.length === 0){{ cont.style.display = 'none'; cont.innerHTML = ''; return; }}
-                cont.innerHTML = list.slice(0,12).map(u => `
-                    <div class="ss-card" style="padding:8px; border-radius:8px; margin-bottom:6px; cursor:pointer; background:var(--bg-card); border:1px solid var(--border-color);">
-                      <div style="font-weight:700; color:var(--text-main);">${{u.user}}</div>
-                      <div style="font-size:12px; color:var(--text-muted);">UID: ${{u.uid}}</div>
-                    </div>
-                `).join('');
-                Array.from(cont.children).forEach((el,i)=>{{ el.addEventListener('click', ()=>{{ window.location = `/users/${{list[i].uid}}.html`; }}); }});
-                cont.style.display = 'block';
-            }}
+def iso(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-            async function doSuggest(q){{
-                if(!q){{ renderSuggestions([], q); return; }}
-                const idx = await loadIndex();
-                const low = q.toLowerCase();
-                const matched = idx.filter(u => (u.user || '').toLowerCase().includes(low)).slice(0,50);
-                renderSuggestions(matched, q);
-            }}
 
-            async function doSearch(q){{
-                if(!q) return;
-                const idx = await loadIndex();
-                const found = idx.find(u => (u.user||'').toLowerCase() === q.toLowerCase());
-                if(found) window.location = `/users/${{found.uid}}.html`;
-            }}
+def parse_iso(s):
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
-            const input = document.getElementById('siteSearch');
-            const suggestBox = document.getElementById('searchSuggestions');
-            if(input){{
-                let timer = null;
-                input.addEventListener('input', function(e){{
-                    clearTimeout(timer);
-                    const v = this.value.trim();
-                    timer = setTimeout(()=> doSuggest(v), 160);
-                }});
-                input.addEventListener('keydown', function(e){{
-                    if(e.key === 'Enter') return doSearch(this.value.trim());
-                    if(e.key === 'Escape') {{ suggestBox.style.display = 'none'; }}
-                }});
-                document.addEventListener('click', function(ev){{ if(!ev.target.closest('#searchSuggestions') && !ev.target.closest('#siteSearch')) {{ suggestBox.style.display = 'none'; }} }});
-            }}
-        }})();
-    </script>
-"""
-
-GOOGLE_BLOCK = """
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-7BV9Y2QVPZ"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-7BV9Y2QVPZ');
-</script>
-"""
-
-STYLE_BLOCK = """
-  <style>
-    :root {
-      --primary: #007bff;
-      --bg-body: #fafafa;
-      --bg-card: #ffffff;
-      --text-main: #1e293b;
-      --text-muted: #666666;
-      --border-color: #eeeeee;
-      --table-hover: #f5f9ff;
-      --btn-bg: #f5f5f5;
-      --btn-border: #dddddd;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg-body: #121212;
-        --bg-card: #1e1e1e;
-        --text-main: #f1f5f9;
-        --text-muted: #94a3b8;
-        --border-color: #2e2e2e;
-        --table-hover: #252526;
-        --btn-bg: #2d2d2d;
-        --btn-border: #444444;
-      }
-    }
-
-    body { font-family: sans-serif; background: var(--bg-body); margin:0; padding:0; color: var(--text-main); transition: background 0.3s, color 0.3s; }
-    .nav { background: #333; color: white; padding: 10px; display: flex; justify-content: center; gap: 20px; position: sticky; top: 0; z-index: 1000; }
-    .nav a { color: #ccc; text-decoration: none; font-weight: bold; padding: 5px 15px; border-radius: 4px; transition: 0.2s; }
-    .nav a:hover { color: white; background: #444; }
-    .nav a.active { color: white; background: var(--primary); }
-    .wrap { max-width: 1500px; margin: 24px auto; padding: 16px; }
-    .card { background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
-    .card.full-width { grid-column: 1 / -1; }
-    h1 { font-size: 24px; margin: 0 0 16px; }
-    h2 { font-size: 18px; margin-top: 0; color: var(--text-main); border-bottom: 2px solid var(--primary); display: inline-block; padding-bottom: 4px; margin-bottom: 15px; }
-    .meta { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
-    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 20px; }
-    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 15px; }
-    .chart-container { width: 100%; height: 350px; }
-    .btns { margin-bottom: 12px; display: flex; gap: 8px; }
-    button { padding: 6px 12px; border: 1px solid var(--btn-border); border-radius: 6px; background: var(--btn-bg); color: var(--text-main); cursor:pointer; font-size: 13px; }
-    button.active { background: var(--primary); color:white; border-color: var(--primary); }
-    .table-container { border-radius: 12px; overflow: hidden; border: 1px solid #007bff33; margin-top: 10px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { background: #007bff; color: white; padding: 10px; text-align: left; cursor: pointer; font-size: 14px; user-select: none; transition: background 0.2s; }
-    th:hover { background: #0056b3; }
-    td { padding: 10px; border-bottom: 1px solid var(--border-color); font-size: 12px; color: var(--text-main); }
-    tr:hover { background: var(--table-hover); }
-    .footer { text-align: center; color: var(--text-muted); font-size: 12px; margin: 40px 0; }
-    .leaderboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
-    .leaderboard-card { background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border-color); padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
-  </style>
-"""
-
-INDEX_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" /><title>OGFStats - Dashboard</title>
-  {{GOOGLE_BLOCK}}
-  {{STYLE_BLOCK}}
-  <script src="https://code.highcharts.com/highcharts.js"></script>
-</head>
-<body>
-  {{NAV_BAR}}
-  <div class="wrap">
-    <h1>Mapping Activity</h1>
-    <p class="meta" id="updateTime">Loading...</p>
-
-    <div class="grid-2">
-        <div class="card">
-            <h2>Latest Changeset ID</h2>
-            <div id="chartID" class="chart-container"></div>
-        </div>
-        <div class="card">
-            <h2>Activity Volume</h2>
-            <div class="btns">
-                <button id="btnHourly" class="active" onclick="setMode('hourly')">Hourly</button>
-                <button id="btnDaily" onclick="setMode('daily')">Daily</button>
-            </div>
-            <div id="chartDiff" class="chart-container"></div>
-        </div>
-
-        <div class="card full-width">
-            <h2>Active Users (Activity Trends)</h2>
-            <div id="mapperChart" class="chart-container" style="height: 400px;"></div>
-        </div>
-
-        <div class="card">
-            <h2>Top Mappers This Month</h2>
-            <div class="btns">
-                <button id="btnBarObjs" class="active" onclick="setBarMetric('objects')">By Objects</button>
-                <button id="btnBarEdits" onclick="setBarMetric('count')">By Edits</button>
-            </div>
-            <div id="userBarChart" class="chart-container" style="height: 435px;"></div>
-        </div>
-        <div class="card">
-            <h2>User Activity Summary</h2>
-            <div class="table-container">
-                <table id="deltaTable">
-                    <thead>
-                        <tr>
-                            <th onclick="sortRows('deltaTable', 0)">Name</th>
-                            <th onclick="sortRows('deltaTable', 1)">Today (Objs)</th>
-                            <th onclick="sortRows('deltaTable', 2)">Week (Objs)</th>
-                            <th onclick="sortRows('deltaTable', 3)">Month (Objs)</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-  </div>
-  <div class="footer">OGFStats by minimapper :)</div>
-
-  <script>
-    document.getElementById('nav_charts').classList.add('active');
-    let rawData = null;
-    let mode = 'hourly';
-    let barMetric = 'objects';
-    let sortDirections = {};
-
-    Highcharts.setOptions({
-        chart: { backgroundColor: 'transparent' }
-    });
-
-    function setMode(m) {
-        mode = m;
-        document.getElementById('btnHourly').classList.toggle('active', m === 'hourly');
-        document.getElementById('btnDaily').classList.toggle('active', m === 'daily');
-        renderTrend();
-    }
-
-    function setBarMetric(m) {
-        barMetric = m;
-        document.getElementById('btnBarObjs').classList.toggle('active', m === 'objects');
-        document.getElementById('btnBarEdits').classList.toggle('active', m === 'count');
-        renderBar();
-    }
-
-    function renderTrend() {
-        const entries = rawData[mode];
-        const diffSeries = entries.map(d => [Date.parse(d.timestamp), d.change ?? 0]);
-        Highcharts.chart('chartDiff', {
-            chart: { type: 'column', zoomType: 'x' },
-            title: { text: 'Changesets', align: 'left', style: { fontWeight: 'bold' } },
-            xAxis: { type: 'datetime', crosshair: true },
-            yAxis: { title: { text: 'Count' } },
-            tooltip: { shared: true, intersect: false },
-            plotOptions: { column: { stickyTracking: true, borderWidth: 0 } },
-            series: [{ name: 'Changesets', data: diffSeries, color: '#007bff' }],
-            credits: { enabled: false }
-        });
-
-        const idSeries = entries.map(d => [Date.parse(d.timestamp), Number(d.changeset_id)]);
-        Highcharts.chart('chartID', {
-            chart: { type: 'line', zoomType: 'x' },
-            title: { text: 'ID History', align: 'left', style: { fontWeight: 'bold' } },
-            xAxis: { type: 'datetime', crosshair: true },
-            yAxis: { title: { text: 'ID' }, startOnTick: false, endOnTick: false },
-            tooltip: { shared: true, intersect: false },
-            plotOptions: { line: { stickyTracking: true } },
-            series: [{ name: 'Latest ID', data: idSeries, color: '#007bff' }],
-            credits: { enabled: false }
-        });
-    }
-
-    function renderBar() {
-        let sorted = [...rawData.monthly_leaderboard].sort((a,b) => b[barMetric] - a[barMetric]).slice(0, 20);
-        Highcharts.chart('userBarChart', {
-            chart: { type: 'column' },
-            title: { text: 'User Ranking', align: 'left', style: { fontWeight: 'bold' } },
-            xAxis: { categories: sorted.map(u => u.user), crosshair: true },
-            yAxis: { title: { text: barMetric === 'count' ? 'Edits' : 'Objects' } },
-            tooltip: { shared: true, intersect: false },
-            plotOptions: { column: { stickyTracking: true, borderWidth: 0 } },
-            series: [{ name: barMetric === 'count' ? 'Edits' : 'Objects Changed', data: sorted.map(u => u[barMetric]), color: '#007bff' }],
-            credits: { enabled: false }
-        });
-    }
-
-    function sortRows(tableId, colIndex) {
-        const table = document.getElementById(tableId);
-        const tbody = table.tBodies[0];
-        const rows = Array.from(tbody.rows);
-        const sortKey = tableId + colIndex;
-        sortDirections[sortKey] = !sortDirections[sortKey];
-        const ascending = sortDirections[sortKey];
-        const sortedRows = rows.sort((a, b) => {
-            const valA = a.cells[colIndex].innerText;
-            const valB = b.cells[colIndex].innerText;
-            const numA = parseFloat(valA);
-            const numB = parseFloat(valB);
-            if (!isNaN(numA) && !isNaN(numB)) return ascending ? numA - numB : numB - numA;
-            return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        });
-        tbody.append(...sortedRows);
-    }
-
-    async function load() {
-        const resp = await fetch('data.json', { cache: 'no-store' });
-        rawData = await resp.json();
-        document.getElementById('updateTime').innerText = "Last Sync: " + rawData.last_month_update;
-
-        const mapperDaily = (rawData.daily_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
-        const mapperWeekly = (rawData.weekly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
-        const mapperMonthly = (rawData.monthly_mapper_counts || []).map(d => [Date.parse(d.date), d.count]);
-
-        Highcharts.chart('mapperChart', {
-            chart: { type: 'line', zoomType: 'x' },
-            title: { text: 'Unique Mappers (Rolling)', align: 'left', style: { fontWeight: 'bold' } },
-            xAxis: { type: 'datetime', crosshair: true },
-            yAxis: { title: { text: 'Unique Users' } },
-            tooltip: { shared: true, crosshairs: true },
-            series: [
-                { name: 'Daily Unique', data: mapperDaily, color: '#007bff' },
-                { name: 'Weekly Unique', data: mapperWeekly, color: '#28a745', visible: false },
-                { name: 'Monthly Unique', data: mapperMonthly, color: '#dc3545', visible: false }
-            ],
-            credits: { enabled: false }
-        });
-
-        const tbody = document.querySelector("#deltaTable tbody");
-        const sorted = [...rawData.monthly_leaderboard].sort((a,b) => b.objects - a.objects).slice(0, 15);
-        tbody.innerHTML = sorted.map(u =>
-            `<tr><td>${u.user}</td><td>${u.d_today || 0}</td><td>${u.d_week || 0}</td><td>${u.objects}</td></tr>`
-        ).join('');
-
-        renderTrend();
-        renderBar();
-    }
-    load();
-  </script>
-</body></html>"""
-
-LEADERBOARD_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" /><title>OGFStats - Leaderboards</title>
-  {{GOOGLE_BLOCK}}
-  {{STYLE_BLOCK}}
-  <script src="https://code.highcharts.com/highcharts.js"></script>
-</head>
-<body>
-  {{NAV_BAR}}
-  <div class="wrap">
-    <h1>User Leaderboards</h1>
-
-    <div class="card full-width">
-        <h2>Objects Changed (Monthly Overview)</h2>
-        <div id="fullUserChart" class="chart-container" style="height: 400px;"></div>
-    </div>
-
-    <div class="leaderboard-grid">
-      <div class="leaderboard-card"><h2>Hourly</h2><div class="table-container"><table id="hourlyTable"><thead><tr><th onclick="sortRows('hourlyTable', 0)">User</th><th onclick="sortRows('hourlyTable', 1)">UID</th><th onclick="sortRows('hourlyTable', 2)">Edits</th><th onclick="sortRows('hourlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="leaderboard-card"><h2>Daily (Rolling 24h)</h2><div class="table-container"><table id="dailyTable"><thead><tr><th onclick="sortRows('dailyTable', 0)">User</th><th onclick="sortRows('dailyTable', 1)">UID</th><th onclick="sortRows('dailyTable', 2)">Edits</th><th onclick="sortRows('dailyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="leaderboard-card"><h2>Monthly</h2><div class="table-container"><table id="monthlyTable"><thead><tr><th onclick="sortRows('monthlyTable', 0)">User</th><th onclick="sortRows('monthlyTable', 1)">UID</th><th onclick="sortRows('monthlyTable', 2)">Edits</th><th onclick="sortRows('monthlyTable', 3)">Objs</th></tr></thead><tbody></tbody></table></div></div>
-    </div>
-  </div>
-
-  <script>
-    document.getElementById('nav_leaderboards').classList.add('active');
-    let sortDirections = {};
-
-    Highcharts.setOptions({
-        chart: { backgroundColor: 'transparent' }
-    });
-
-    function renderFullChart(users) {
-        const sorted = [...users].sort((a,b) => b.objects - a.objects);
-        Highcharts.chart('fullUserChart', {
-            chart: { type: 'column' },
-            title: { text: 'Full Distribution (Linear)', align: 'left', style: { fontWeight: 'bold' } },
-            xAxis: { categories: sorted.map(u => u.user), labels: { enabled: false }, crosshair: true },
-            yAxis: { title: { text: 'Objects Changed' } },
-            tooltip: { shared: true, intersect: false },
-            plotOptions: { column: { stickyTracking: true, borderWidth: 0 } },
-            series: [{ name: 'Objects', data: sorted.map(u => u.objects), color: '#007bff' }],
-            credits: { enabled: false }
-        });
-    }
-
-    function fillTable(id, list) {
-        if (!list) return;
-        document.querySelector(`#${id} tbody`).innerHTML = list.map(u => `<tr><td>${u.user}</td><td>${u.uid}</td><td>${u.count}</td><td>${u.objects}</td></tr>`).join('');
-    }
-
-    function sortRows(tableId, colIndex) {
-        const table = document.getElementById(tableId);
-        const tbody = table.tBodies[0];
-        const rows = Array.from(tbody.rows);
-        const sortKey = tableId + colIndex;
-        sortDirections[sortKey] = !sortDirections[sortKey];
-        const ascending = sortDirections[sortKey];
-        const sortedRows = rows.sort((a, b) => {
-            const valA = a.cells[colIndex].innerText;
-            const valB = b.cells[colIndex].innerText;
-            const numA = parseFloat(valA);
-            const numB = parseFloat(valB);
-            if (!isNaN(numA) && !isNaN(numB)) return ascending ? numA - numB : numB - numA;
-            return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        });
-        tbody.append(...sortedRows);
-    }
-
-    async function load() {
-        const resp = await fetch('data.json', { cache: 'no-store' });
-        const data = await resp.json();
-        renderFullChart(data.monthly_leaderboard || []);
-        fillTable('hourlyTable', data.hourly_leaderboards?.slice(-1)[0]?.leaderboard || []);
-        fillTable('dailyTable', data.daily_leaderboard || []);
-        fillTable('monthlyTable', data.monthly_leaderboard || []);
-    }
-    load();
-  </script>
-</body></html>"""
-
-VERSION_HTML = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8" /><title>Version History</title>{GOOGLE_BLOCK}{STYLE_BLOCK}</head>
-<body>
-  {NAV_BAR}
-  <div class="wrap">
-    <div class="card">
-        <h1>Version History</h1>
-        <div id="versionList"></div>
-    </div>
-  </div>
-  <script>
-    document.getElementById('nav_version').classList.add('active');
-    const historyData = {json.dumps(VERSION_HISTORY)};
-    document.getElementById('versionList').innerHTML = historyData.map(v => `
-        <div style="border-bottom: 1px solid #eee; padding: 12px 0;">
-            <span style="background: #eee; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">v${{v.v}}</span>
-            <strong>${{v.date}}</strong>
-            <p style="margin: 8px 0 0; font-size: 14px; color: #444;">${{v.note}}</p>
-        </div>
-    `).join('');
-  </script>
-</body></html>"""
-
-# --- PYTHON LOGIC ---
 
 def get_initial_data():
     return {
@@ -464,6 +57,7 @@ def get_initial_data():
         "last_month_update": "", "last_daily_run_day": "", "seen_ids": [],
         "daily_mapper_counts": [], "weekly_mapper_counts": [], "monthly_mapper_counts": []
     }
+
 
 def fetch_recent_changesets(lookback_hours=2):
     start_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
@@ -521,201 +115,309 @@ def tally_users(entries):
         counts[key]["count"] += 1; counts[key]["objects"] += e.get("changes_count", 0)
     return [{"user": u, "uid": uid, "count": c["count"], "objects": c["objects"]} for (u, uid), c in sorted(counts.items(), key=lambda kv: (kv[1]["count"], kv[1]["objects"]), reverse=True)]
 
+def dedupe(entries):
+    seen, out = set(), []
+    for e in entries:
+        if e.get("id") in seen:
+            continue
+        seen.add(e.get("id"))
+        out.append(e)
+    return out
+
+
+def load_cache_entries(since_dt):
+    """Entries from the per-day cache files (written by every run since the start)."""
+    out = []
+    if not CACHE_DIR.exists():
+        return out
+    since_day = (since_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    for f in sorted(CACHE_DIR.glob("*.json")):
+        if f.stem < since_day:
+            continue
+        try:
+            for e in json.loads(f.read_text(encoding="utf-8")):
+                e.setdefault("ts", e.get("created_at"))
+                out.append(e)
+        except Exception:
+            continue
+    return out
+
+
+def rebuild_rolling_history(data):
+    """One-time repair: recompute the old (month-reset) rolling mapper counts from the cache files."""
+    spans = {"daily_mapper_counts": 1, "weekly_mapper_counts": 7, "monthly_mapper_counts": 30}
+    dates = [p["date"] for k in spans for p in data.get(k, [])]
+    if not dates:
+        return 0
+    entries = dedupe(load_cache_entries(parse_iso(min(dates)) - timedelta(days=31)))
+    people = sorted((e["ts"], f'{e.get("user")}|{e.get("uid")}') for e in entries if e.get("ts"))
+    if not people:
+        return 0
+    times = [t for t, _ in people]
+    fixed = 0
+    for key, days in spans.items():
+        for p in data.get(key, []):
+            start = iso(parse_iso(p["date"]) - timedelta(days=days))
+            if start < times[0]:
+                continue  # cache doesn't cover this window, leave as is
+            lo = bisect_left(times, start)
+            hi = bisect_left(times, p["date"] + "~")  # everything up to and including this timestamp
+            p["count"] = len({u for _, u in people[lo:hi]})
+            fixed += 1
+    return fixed
+
+
+def downsample(points, keep=24 * 14):
+    """Older points -> one per day, recent ones untouched (keeps stats.json small)."""
+    if len(points) <= keep:
+        return points
+    older, recent = points[:-keep], points[-keep:]
+    by_day = {}
+    for p in older:
+        by_day[p["date"][:10]] = p
+    return list(by_day.values()) + recent
+
+
+def write_public_stats(data):
+    """Slim file for the website (data.json also contains the big internal state)."""
+    hl = data.get("hourly_leaderboards", [])
+    out = {
+        "last_month_update": data.get("last_month_update", ""),
+        "hourly": data.get("hourly", []), "daily": data.get("daily", []),
+        "monthly_leaderboard": data.get("monthly_leaderboard", []),
+        "daily_leaderboard": data.get("daily_leaderboard", []),
+        "hourly_leaderboards": hl[-1:],
+        "daily_mapper_counts": downsample(data.get("daily_mapper_counts", [])),
+        "weekly_mapper_counts": downsample(data.get("weekly_mapper_counts", [])),
+        "monthly_mapper_counts": downsample(data.get("monthly_mapper_counts", [])),
+    }
+    atomic_write(TARGET_DIR / "stats.json", json.dumps(out, separators=(",", ":")))
+
+
 def run_update(data_file, now):
+    """Fetch new changesets, update data.json / user files. Returns {uid: username} of changed users."""
     data = get_initial_data()
     if data_file.exists():
-        try:
-            loaded = json.loads(data_file.read_text(encoding="utf-8"))
-            data.update(loaded)
-        except: pass
+        data.update(json.loads(data_file.read_text(encoding="utf-8")))  # raises on corrupt file: never overwrite it
 
     raw_entries = fetch_recent_changesets()
-    seen = set(data.get("seen_ids", []))
-    new_entries = [e for e in raw_entries if e["id"] not in seen]
-    for e in new_entries: seen.add(e["id"])
-    data["seen_ids"] = list(seen)[-5000:]
+    seen_list = list(data.get("seen_ids", []))
+    seen = set(seen_list)
+    new_entries = []
+    for e in raw_entries:
+        if e["id"] in seen:
+            continue
+        seen.add(e["id"]); seen_list.append(e["id"]); new_entries.append(e)
+    data["seen_ids"] = seen_list[-5000:]
 
     bucket_ts = now.replace(minute=0, second=0, microsecond=0)
-    ts_str = bucket_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
-    data["last_month_update"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
+    ts_str = iso(bucket_ts)
+    data["last_month_update"] = iso(now)
     cid = int(raw_entries[0]["id"]) if raw_entries else (data["hourly"][-1]["changeset_id"] if data["hourly"] else 0)
 
-    existing_hourly = next((item for item in data["hourly"] if item["timestamp"] == ts_str), None)
+    existing_hourly = next((i for i in data["hourly"] if i["timestamp"] == ts_str), None)
     if existing_hourly:
         existing_hourly["change"] += len(new_entries)
         existing_hourly["changeset_id"] = cid
     else:
         data["hourly"].append({"timestamp": ts_str, "changeset_id": cid, "change": len(new_entries)})
-        data["hourly"] = data["hourly"][-720:]
+        data["hourly"] = data["hourly"][-HOURLY_POINTS:]
 
-    data.setdefault("monthly_store", []).extend(new_entries)
+    # daily totals (previously never filled in); seeded from the hourly history the first time
+    day_ts = now.strftime("%Y-%m-%dT00:00:00Z")
+    daily = data.get("daily") or []
+    if not daily:
+        by_day = {}
+        for h in data["hourly"]:
+            d = h["timestamp"][:10] + "T00:00:00Z"
+            r = by_day.setdefault(d, {"timestamp": d, "changeset_id": 0, "change": 0})
+            r["change"] += h.get("change", 0); r["changeset_id"] = h["changeset_id"]
+        daily = list(by_day.values())
+    elif daily[-1]["timestamp"] == day_ts:
+        daily[-1]["change"] += len(new_entries); daily[-1]["changeset_id"] = cid
+    else:
+        daily.append({"timestamp": day_ts, "changeset_id": cid, "change": len(new_entries)})
+    data["daily"] = daily[-1000:]
+
+    # --- rolling store: keep ~31 days so day/week/30-day windows never reset at month change
+    store = data.get("monthly_store") or []
+    if not data.get("store_backfilled"):
+        store = store + load_cache_entries(now - timedelta(days=ROLLING_DAYS))
+        data["store_backfilled"] = True
+    store = dedupe(store + new_entries)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    keep_from = iso(min(month_start, now - timedelta(days=ROLLING_DAYS)))
+    store = [e for e in store if (e.get("ts") or "") >= keep_from]
+    data["monthly_store"] = store
+
     this_month = now.strftime("%Y-%m")
-    data["monthly_store"] = [e for e in data["monthly_store"] if e.get("ts", "").startswith(this_month)]
+    t24, t7, t30 = (iso(now - timedelta(days=d)) for d in (1, 7, 30))
+    today_list = tally_users([e for e in store if (e.get("ts") or "") >= t24])
+    week_list = tally_users([e for e in store if (e.get("ts") or "") >= t7])
+    roll30 = tally_users([e for e in store if (e.get("ts") or "") >= t30])
+    full_month = tally_users([e for e in store if (e.get("ts") or "").startswith(this_month)])
 
-    day_ago = (now - timedelta(days=1)).isoformat()
-    week_ago = (now - timedelta(days=7)).isoformat()
+    for key, lst in (("daily_mapper_counts", today_list), ("weekly_mapper_counts", week_list), ("monthly_mapper_counts", roll30)):
+        data.setdefault(key, []).append({"date": ts_str, "count": len(lst)})
+        data[key] = data[key][-HISTORY_POINTS:]
 
-    today_list = tally_users([e for e in data["monthly_store"] if e.get("ts", "") >= day_ago])
-    week_list = tally_users([e for e in data["monthly_store"] if e.get("ts", "") >= week_ago])
-    full_month = tally_users(data["monthly_store"])
-
-    data.setdefault("daily_mapper_counts", []).append({"date": ts_str, "count": len(today_list)})
-    data.setdefault("weekly_mapper_counts", []).append({"date": ts_str, "count": len(week_list)})
-    data.setdefault("monthly_mapper_counts", []).append({"date": ts_str, "count": len(full_month)})
-
-    data["daily_mapper_counts"] = data["daily_mapper_counts"][-720:]
-    data["weekly_mapper_counts"] = data["weekly_mapper_counts"][-720:]
-    data["monthly_mapper_counts"] = data["monthly_mapper_counts"][-720:]
-
+    today_map = {x["uid"]: x["objects"] for x in today_list}
+    week_map = {x["uid"]: x["objects"] for x in week_list}
     for u in full_month:
-        u["d_today"] = next((x["objects"] for x in today_list if x["uid"] == u["uid"]), 0)
-        u["d_week"] = next((x["objects"] for x in week_list if x["uid"] == u["uid"]), 0)
-
-    data["monthly_leaderboard"] = full_month
+        u["d_today"] = today_map.get(u["uid"], 0)
+        u["d_week"] = week_map.get(u["uid"], 0)
+    data["monthly_leaderboard"] = full_month   # calendar month, by design
     data["daily_leaderboard"] = today_list
 
     data.setdefault("hourly_leaderboards", []).append({"timestamp": ts_str, "leaderboard": tally_users(new_entries)})
     data["hourly_leaderboards"] = data["hourly_leaderboards"][-48:]
-    data_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    atomic_write(data_file, json.dumps(data, indent=2))
+    write_public_stats(data)
 
-    try:
+    changed = {}
+    if new_entries:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         USERS_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-    if new_entries:
-        dayfile = CACHE_DIR / (now.strftime('%Y-%m-%d') + '.json')
-        daily = []
+        dayfile = CACHE_DIR / (now.strftime("%Y-%m-%d") + ".json")
+        daily_cache = []
         if dayfile.exists():
-            try: daily = json.loads(dayfile.read_text(encoding='utf-8'))
-            except: daily = []
-        daily.extend(new_entries)
-        dayfile.write_text(json.dumps(daily, indent=2), encoding='utf-8')
+            try: daily_cache = json.loads(dayfile.read_text(encoding="utf-8"))
+            except Exception: daily_cache = []
+        daily_cache.extend(new_entries)
+        atomic_write(dayfile, json.dumps(daily_cache, indent=2))
 
+        by_uid = {}
         for e in new_entries:
-            try:
-                uid = str(e.get('uid') or 'unknown')
-                userfile = USERS_DIR / f"{uid}.json"
-                ulist = []
-                if userfile.exists():
-                    try: ulist = json.loads(userfile.read_text(encoding='utf-8'))
-                    except: ulist = []
-                entry = {k: e.get(k) for k in ['id','created_at','closed_at','comment','created_by','source','changes_count','lat','lon']}
-                entry['user'] = e.get('user')
-                entry['uid'] = uid
-                ulist.append(entry)
-                userfile.write_text(json.dumps(ulist, indent=2), encoding='utf-8')
-            except Exception:
-                continue
-
-        try:
-            index = []
-            for f in USERS_DIR.glob('*.json'):
-                if f.name == 'index.json': continue
+            by_uid.setdefault(str(e.get("uid") or "unknown"), []).append(e)
+        for uid, es in by_uid.items():
+            userfile = USERS_DIR / f"{uid}.json"
+            ulist = []
+            if userfile.exists():
                 try:
-                    uid = f.stem
-                    lst = json.loads(f.read_text(encoding='utf-8'))
-                    if not lst: continue
-                    index.append({'uid': uid, 'user': lst[-1].get('user','')})
-                except:
-                    continue
-            (USERS_DIR / 'index.json').write_text(json.dumps(index, indent=2), encoding='utf-8')
-        except Exception:
-            pass
+                    ulist = json.loads(userfile.read_text(encoding="utf-8"))
+                except Exception:
+                    shutil.copyfile(userfile, userfile.with_name(f"{uid}.json.corrupt"))
+                    ulist = []
+            for e in es:
+                entry = {k: e.get(k) for k in ["id", "created_at", "closed_at", "comment", "created_by", "source", "changes_count", "lat", "lon"]}
+                entry["user"] = e.get("user"); entry["uid"] = uid
+                ulist.append(entry)
+            atomic_write(userfile, json.dumps(ulist, indent=2))
+            changed[uid] = es[-1].get("user") or ""
+    return changed
+
+
+def install_site():
+    """Copy web/ (html, css, js) into the served directory and write assets/meta.js."""
+    if not WEB_DIR.is_dir():
+        raise SystemExit(f"web/ folder not found next to ogfstats.py ({WEB_DIR}) - copy it from the repo.")
+    for src in WEB_DIR.rglob("*"):
+        if src.is_dir() or src.name.endswith("_template.html"):
+            continue
+        dst = TARGET_DIR / src.relative_to(WEB_DIR)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.suffix in (".html", ".css", ".js"):
+            atomic_write(dst, src.read_text(encoding="utf-8").replace("__V__", VERSION))
+        else:
+            shutil.copyfile(src, dst)
+    meta = {"version": VERSION, "history": VERSION_HISTORY}
+    atomic_write(TARGET_DIR / "assets" / "meta.js", "window.OGF_META = " + json.dumps(meta) + ";")
+
+
+def update_user_pages(changed):
+    try:
+        if changed:
+            generate_user_pages.generate_pages(USERS_DIR, VERSION, uids=list(changed))
+    except Exception as e:
+        print(f"User page generation error: {e}")
+
+
+def startup_maintenance(data_file):
+    """Automatic one-time jobs after an upgrade (no manual steps needed)."""
+    if data_file.exists():
+        data = json.loads(data_file.read_text(encoding="utf-8"))
+        if not data.get("rolling_rebuilt"):
+            n = rebuild_rolling_history(data)
+            data["rolling_rebuilt"] = True
+            atomic_write(data_file, json.dumps(data, indent=2))
+            print(f"Rebuilt {n} rolling-count points from cache.")
+        write_public_stats(data)
+    if USERS_DIR.exists() and not generate_user_pages.pages_current(USERS_DIR, VERSION):
+        print("Regenerating all user pages for this version...")
+        n = generate_user_pages.generate_pages(USERS_DIR, VERSION)
+        generate_user_pages.mark_pages(USERS_DIR, VERSION)
+        print(f"Generated {n} user pages.")
+
+
+def territory_job(data_file, now, state):
+    """Runs ts.py once per UTC day in the background so hourly syncs are never blocked."""
+    today = now.strftime("%Y-%m-%d")
+    proc = state.get("proc")
+    if proc is not None:
+        rc = proc.poll()
+        if rc is None:
+            return
+        state["proc"] = None
+        if rc == 0:
+            print("ts.py finished OK")
+            try:
+                d = json.loads(data_file.read_text(encoding="utf-8"))
+                d["last_daily_run_day"] = state["day"]
+                atomic_write(data_file, json.dumps(d, indent=2))
+            except Exception as e:
+                print(f"Could not record ts.py run: {e}")
+        else:
+            state["fails"][state["day"]] = state["fails"].get(state["day"], 0) + 1
+            print(f"ts.py failed (exit {rc})")
+    try:
+        last = json.loads(data_file.read_text(encoding="utf-8")).get("last_daily_run_day")
+    except Exception:
+        last = None
+    if last == today or state["fails"].get(today, 0) >= 3:
+        return
+    print(f"Starting ts.py for {today} ...")
+    state["proc"] = subprocess.Popen([sys.executable, str(HERE / "ts.py"), "--outdir", str(TARGET_DIR)], cwd=str(HERE))
+    state["day"] = today
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--once', action='store_true', help='Run a single update and exit (good for testing)')
-    parser.add_argument('--outdir', type=str, default=None, help='Override output directory (e.g. ./site)')
+    parser.add_argument("--once", action="store_true", help="Run a single update and exit (good for testing)")
+    parser.add_argument("--outdir", type=str, default=None, help="Override output directory (e.g. ./site)")
     args = parser.parse_args()
 
+    global TARGET_DIR, CACHE_DIR, USERS_DIR
     if args.once and not args.outdir:
-        args.outdir = str(Path(__file__).parent.joinpath('site').resolve())
-
+        args.outdir = str(HERE / "site")
     if args.outdir:
-        out = Path(args.outdir).resolve()
-        global TARGET_DIR, CACHE_DIR, USERS_DIR
-        TARGET_DIR = out
+        TARGET_DIR = Path(args.outdir).resolve()
         CACHE_DIR = TARGET_DIR / "user_cache"
         USERS_DIR = TARGET_DIR / "users"
-
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
 
-    final_index = INDEX_HTML.replace("{{GOOGLE_BLOCK}}", GOOGLE_BLOCK).replace("{{STYLE_BLOCK}}", STYLE_BLOCK).replace("{{NAV_BAR}}", NAV_BAR)
-    final_leaderboard = LEADERBOARD_HTML.replace("{{GOOGLE_BLOCK}}", GOOGLE_BLOCK).replace("{{STYLE_BLOCK}}", STYLE_BLOCK).replace("{{NAV_BAR}}", NAV_BAR)
-
-    pages = {"index.html": final_index, "leaderboards.html": final_leaderboard, "version.html": VERSION_HTML}
-    for f, c in pages.items():
-        (TARGET_DIR / f).write_text(c, encoding='utf-8')
-
+    install_site()
     data_file = TARGET_DIR / "data.json"
-
-    # FIX: Isolate daily tasks tracking variable from loop updates
-    last_ts_run_day = None
-    if data_file.exists():
-        try:
-            temp_data = json.loads(data_file.read_text(encoding="utf-8"))
-            last_ts_run_day = temp_data.get("last_daily_run_day")
-        except:
-            pass
-
     print(f"Starting OGFStats v{VERSION}...")
+    startup_maintenance(data_file)
 
     if args.once:
-        now = datetime.now(timezone.utc)
-        run_update(data_file, now)
-        try:
-            import generate_user_pages
-            old_argv = sys.argv
-            sys.argv = [sys.argv[0], '--outdir', str(TARGET_DIR)]
-            generate_user_pages.main()
-            sys.argv = old_argv
-            print("✓ user pages generated (one-shot)")
-        except Exception as e:
-            print(f"Error generating user pages: {e}")
+        update_user_pages(run_update(data_file, datetime.now(timezone.utc)))
+        print("One-shot update done.")
         return
 
+    state = {"proc": None, "day": None, "fails": {}}
     while True:
         try:
             now = datetime.now(timezone.utc)
-            run_update(data_file, now)
-
-            # FIX: Ensure checking "last_daily_run_day" tracks execution safely across machine restarts
-            current_day = now.strftime("%Y-%m-%d")
-            if now.hour == 0 and last_ts_run_day != current_day:
-                print(f"Midnight hour detected ({current_day} 00:00). Running ts.py...")
-                try:
-                    subprocess.run([sys.executable, "ts.py"], check=True)
-                    print("✓ ts.py completed successfully.")
-                except Exception as e:
-                    print(f"❌ Error running ts.py: {e}")
-
-                try:
-                    import generate_user_pages
-                    generate_user_pages.main()
-                    print("✓ generate_user_pages completed successfully.")
-                except Exception as e:
-                    print(f"❌ Error running generate_user_pages: {e}")
-
-                # Save the run indicator inside data.json explicitly
-                last_ts_run_day = current_day
-                if data_file.exists():
-                    try:
-                        f_data = json.loads(data_file.read_text(encoding="utf-8"))
-                        f_data["last_daily_run_day"] = current_day
-                        data_file.write_text(json.dumps(f_data, indent=2), encoding="utf-8")
-                    except:
-                        pass
-
+            update_user_pages(run_update(data_file, now))
+            territory_job(data_file, now, state)
         except Exception as e:
             print(f"Critical Loop error: {e}")
-
         now = datetime.now(timezone.utc)
-        seconds_until_next_hour = 3600 - (now.minute * 60 + now.second) + 5
-        print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {seconds_until_next_hour}s...")
-        time.sleep(max(0, seconds_until_next_hour))
+        wait = 3600 - (now.minute * 60 + now.second) + 5
+        print(f"Sync complete at {now.strftime('%H:%M:%S')}. Next run in {wait}s...")
+        time.sleep(max(0, wait))
+
 
 if __name__ == "__main__":
     main()

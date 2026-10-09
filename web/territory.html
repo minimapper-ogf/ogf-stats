@@ -1,0 +1,60 @@
+<!DOCTYPE html><html lang="en"><head><title>OGFStats – Territories</title><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/assets/favicon.svg">
+<script>try{var t=localStorage.getItem("ogf-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/assets/style.css?v=__V__">
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="/assets/meta.js?v=__V__"></script>
+<script src="/assets/app.js?v=__V__"></script><script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script></head>
+<body data-page="territory"><div class="wrap">
+<div class="page-head"><div><h1>Territory Stats</h1><p class="sub">Nodes, ways and relations per claimed territory (updated daily)</p></div><span class="pill" id="updateTime">Loading…</span></div>
+<div class="dash">
+ <aside class="card side">
+  <input type="text" id="q" placeholder="Search territories…">
+  <div class="row"><div class="seg" id="sortSeg"><button class="on" data-v="size">Largest</button><button data-v="name">A–Z</button></div><button class="icon-btn" style="width:auto;padding:0 10px;font-size:13px" id="all">All</button><button class="icon-btn" style="width:auto;padding:0 10px;font-size:13px" id="none">None</button></div>
+  <div class="list" id="list"></div>
+ </aside>
+ <main>
+  <div class="row"><div class="seg" id="metricSeg"><button class="on" data-v="nodes">Nodes</button><button data-v="ways">Ways</button><button data-v="relations">Relations</button></div></div>
+  <section class="card" style="margin-bottom:18px"><div class="card-head"><h2>Growth over time</h2><span class="sub" id="hint">Select territories on the left</span></div><div id="line" class="chart tall"></div></section>
+  <section class="card"><div class="card-head"><h2>Current totals</h2></div><div id="bars" class="chart"></div></section>
+ </main>
+</div></div>
+<script>
+var snap=[],metric='nodes',hist={},line,sel={};
+function csv(p){return fetch(p,{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.text()}).then(function(t){return Papa.parse(t,{header:true,skipEmptyLines:true}).data})}
+function file(r){return'tdata/territory/'+encodeURIComponent(r.territory.replace(/,/g,'').replace(/[\/\\]/g,'-').replace(/ /g,'_')+'_'+r.rel+'.csv')}
+function series(name){var h=hist[name];return h?h.map(function(r){return[Date.parse(r.timestamp),+r[metric]]}):[]}
+function drawBars(){
+  var s=snap.slice().sort(function(a,b){return b[metric]-a[metric]});
+  Highcharts.chart('bars',{chart:{type:'column'},xAxis:{categories:s.map(function(r){return r.territory}),labels:{enabled:false},crosshair:true},yAxis:{title:{text:metric}},legend:{enabled:false},series:[{name:metric,data:s.map(function(r){return+r[metric]})}]});
+}
+function toggle(r,on){
+  sel[r.territory]=on;
+  if(!on){var s=line.get(r.territory);if(s)s.remove(false);return Promise.resolve()}
+  var p=hist[r.territory]?Promise.resolve():csv(file(r)).then(function(d){hist[r.territory]=d}).catch(function(){});
+  return p.then(function(){if(hist[r.territory]&&sel[r.territory]&&!line.get(r.territory))line.addSeries({id:r.territory,name:r.territory,data:series(r.territory)},false)});
+}
+function refresh(){line.redraw();var n=Object.keys(sel).filter(function(k){return sel[k]}).length;document.getElementById('hint').textContent=n?n+' selected':'Select territories on the left'}
+function drawList(){
+  var by=document.querySelector('#sortSeg .on').dataset.v,q=document.getElementById('q').value.toLowerCase();
+  var s=snap.slice().sort(function(a,b){return by==='name'?a.territory.localeCompare(b.territory):b.total-a.total}).filter(function(r){return r.territory.toLowerCase().indexOf(q)>-1});
+  var l=document.getElementById('list');l.innerHTML='';
+  s.forEach(function(r){var lb=document.createElement('label'),cb=document.createElement('input');cb.type='checkbox';cb.checked=!!sel[r.territory];
+    cb.onchange=function(){toggle(r,cb.checked).then(refresh)};
+    var n=document.createElement('span');n.textContent=r.territory;var c=document.createElement('small');c.textContent=OGF.num(r.total);
+    lb.append(cb,n,c);l.appendChild(lb)});
+}
+function bulk(on){var q=document.getElementById('q').value.toLowerCase();var t=snap.filter(function(r){return r.territory.toLowerCase().indexOf(q)>-1}),i=0;
+  function next(){var w=[];while(w.length<6&&i<t.length)w.push(toggle(t[i++],on));if(!w.length){refresh();drawList();return}Promise.all(w).then(next)}next()}
+csv('tdata/territory-latest.csv').then(function(d){
+  snap=d.map(function(r){r.total=+r.total||(+r.nodes+ +r.ways+ +r.relations);return r});
+  document.getElementById('updateTime').textContent='Updated '+OGF.ago(snap[0]&&snap[0].timestamp);
+  line=Highcharts.chart('line',{chart:{type:'line',zoomType:'x'},xAxis:{type:'datetime'},yAxis:{title:{text:'Count'}},legend:{enabled:false},tooltip:{shared:true,crosshairs:true},plotOptions:{series:{marker:{enabled:true,radius:2},turboThreshold:0}},series:[]});
+  drawBars();
+  Promise.all(snap.slice().sort(function(a,b){return b.total-a.total}).slice(0,3).map(function(r){return toggle(r,true)})).then(function(){refresh();drawList()});
+}).catch(function(){document.getElementById('updateTime').textContent='Could not load data'});
+OGF.seg(document.getElementById('metricSeg'),function(v){metric=v;drawBars();line.series.slice().forEach(function(s){s.setData(series(s.options.id),false)});line.yAxis[0].setTitle({text:v});line.redraw()});
+OGF.seg(document.getElementById('sortSeg'),drawList);
+document.getElementById('q').oninput=drawList;
+document.getElementById('all').onclick=function(){bulk(true)};document.getElementById('none').onclick=function(){bulk(false)};
+</script></body></html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html><html lang="en"><head><title>__TITLE__ – OGFStats</title><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/assets/favicon.svg">
+<script>try{var t=localStorage.getItem("ogf-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/assets/style.css?v=__V__">
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<script src="/assets/meta.js?v=__V__"></script>
+<script src="/assets/app.js?v=__V__"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script></head>
+<body data-page="user"><div class="wrap">
+<div class="page-head"><div><h1 id="name"></h1><p class="sub" id="meta"></p></div><a class="pill" id="ogf" target="_blank" rel="noopener">OGF profile</a></div>
+<div class="stats" id="kpis"></div>
+<div class="grid">
+ <section class="card span"><div class="card-head"><h2>Daily activity</h2><div class="row" style="margin:0"><div class="seg" id="rangeSeg"><button data-v="30">30d</button><button data-v="90">90d</button><button class="on" data-v="365">1y</button><button data-v="0">All</button></div><div class="seg" id="metricSeg"><button class="on" data-v="2">Objects</button><button data-v="1">Changesets</button></div></div></div><div id="daily" class="chart"></div></section>
+ <section class="card"><div class="card-head"><h2>Editors</h2></div><div id="editors" class="chart"></div></section>
+ <section class="card"><div class="card-head"><h2>Active hours (UTC)</h2></div><div id="hours" class="chart"></div></section>
+ <section class="card span"><div class="card-head"><h2>Recent changesets</h2></div><div id="recent"></div></section>
+ <section class="card"><div class="card-head"><h2>Top sources</h2></div><div id="sources"></div></section>
+ <section class="card" id="mapCard"><div class="card-head"><h2>Where they map</h2></div><div id="map" style="height:360px;border-radius:8px;overflow:hidden"></div></section>
+</div></div>
+<script>
+var D=__DATA__,DAY=864e5;
+document.getElementById('name').textContent=D.user||'Unknown';
+document.getElementById('meta').innerHTML='<span class="chip">UID '+OGF.esc(D.uid)+'</span><span class="chip">First seen '+OGF.esc((D.first||'').slice(0,10))+'</span><span class="chip">Last active '+OGF.esc((D.last||'').slice(0,10))+'</span>';
+document.getElementById('ogf').href='https://opengeofiction.net/user/'+encodeURIComponent(D.user||'');
+var first=Date.parse((D.first||'').slice(0,10)),today=Date.parse(new Date().toISOString().slice(0,10)),all=[];
+for(var t=first;t<=today;t+=DAY){var v=D.days[new Date(t).toISOString().slice(0,10)]||[0,0];all.push([t,v[0],v[1]])}
+var active=all.filter(function(a){return a[1]>0}),best=all.reduce(function(b,a){return a[2]>b[2]?a:b},[0,0,0]),run=0,longest=0;
+all.forEach(function(a){run=a[1]>0?run+1:0;if(run>longest)longest=run});
+var k=[['Changesets',OGF.num(D.total_cs)],['Objects changed',OGF.num(D.total_objs)],['Active days',OGF.num(active.length)],['Longest streak',longest+' days'],['Best day',OGF.num(best[2]),best[0]?new Date(best[0]).toISOString().slice(0,10):''],['Objects / changeset',D.total_cs?OGF.num(Math.round(D.total_objs/D.total_cs)):'0']];
+document.getElementById('kpis').innerHTML=k.map(function(x){return'<div class="stat"><div class="l">'+x[0]+'</div><div class="v">'+x[1]+'</div><div class="s">'+(x[2]||'&nbsp;')+'</div></div>'}).join('');
+var range=365,col=2;
+function drawDaily(){var s=range?all.slice(-range):all;Highcharts.chart('daily',{chart:{type:'column',zoomType:'x'},xAxis:{type:'datetime',crosshair:true},yAxis:{title:{text:col===2?'Objects':'Changesets'},min:0},legend:{enabled:false},series:[{name:col===2?'Objects':'Changesets',data:s.map(function(a){return[a[0],a[col]]})}]})}
+OGF.seg(document.getElementById('rangeSeg'),function(v){range=+v;drawDaily()});OGF.seg(document.getElementById('metricSeg'),function(v){col=+v;drawDaily()});drawDaily();
+Highcharts.chart('editors',{chart:{type:'pie'},tooltip:{pointFormat:'<b>{point.y}</b> changesets'},plotOptions:{pie:{innerSize:'55%',dataLabels:{enabled:true,format:'{point.name}',style:{color:'var(--text)',textOutline:'none'}}}},series:[{name:'Editors',data:Object.keys(D.editors).map(function(e){return{name:e,y:D.editors[e]}})}]});
+Highcharts.chart('hours',{chart:{type:'column'},xAxis:{categories:D.hours.map(function(_,i){return String(i)}),title:{text:'Hour (UTC)'}},yAxis:{title:{text:'Changesets'}},legend:{enabled:false},series:[{name:'Changesets',data:D.hours}]});
+var ch=function(id){return'<a href="https://opengeofiction.net/changeset/'+encodeURIComponent(id)+'" target="_blank" rel="noopener">#'+OGF.esc(id)+'</a>'};
+OGF.table(document.getElementById('recent'),{rows:D.recent,sort:{key:'t',dir:-1},columns:[{key:'t',label:'When (UTC)',render:function(r){return OGF.esc((r.t||'').replace('T',' ').replace('Z',''))}},{key:'id',label:'Changeset',nosort:true,render:function(r){return ch(r.id)}},{key:'c',label:'Comment',render:function(r){return OGF.esc(r.c)}},{key:'e',label:'Editor'},{key:'o',label:'Objects',num:true,render:function(r){return OGF.num(r.o)}}]});
+var src=Object.keys(D.sources).map(function(s){return{s:s,n:D.sources[s]}});
+OGF.table(document.getElementById('sources'),{rows:src,sort:{key:'n',dir:-1},empty:'No sources recorded',columns:[{key:'s',label:'Source'},{key:'n',label:'Changesets',num:true}]});
+if(D.points.length){var m=L.map('map');L.tileLayer('https://tile.opengeofiction.net/ogf-carto/{z}/{x}/{y}.png',{maxZoom:19,attribution:'OGF Tiles'}).addTo(m);
+  var acc=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#0d9488';
+  D.points.forEach(function(p,i){L.circleMarker(p,{radius:i===0?8:4,color:'#fff',weight:1,fillColor:i===0?'#ef4444':acc,fillOpacity:.85}).addTo(m).bindPopup(i===0?'Latest changeset':'Changeset location')});
+  var b=L.latLngBounds(D.points);m.fitBounds(b,{padding:[30,30],maxZoom:9})}else document.getElementById('mapCard').style.display='none';
+</script></body></html>
