@@ -22,7 +22,8 @@ function pts(a,f){return a.map(function(d){return[Date.parse(d.timestamp||d.date
 function renderTrend(){
   var e=mode==='daily'?(S.daily&&S.daily.length?S.daily:daily(S.hourly||[])):(S.hourly||[]);
   Highcharts.chart('chartDiff',{chart:{type:'column',zoomType:'x'},xAxis:{type:'datetime',crosshair:true},yAxis:{title:{text:'Changesets'}},legend:{enabled:false},series:[{name:'Changesets',data:pts(e,function(d){return d.change||0})}]});
-  Highcharts.chart('chartID',{chart:{type:'areaspline',zoomType:'x'},xAxis:{type:'datetime',crosshair:true},yAxis:{title:{text:'ID'},startOnTick:false,endOnTick:false},legend:{enabled:false},plotOptions:{areaspline:{fillOpacity:.12,marker:{enabled:false}}},series:[{name:'Latest ID',data:pts(e,function(d){return Number(d.changeset_id)})}]});
+  var id=e.map(function(d){return Number(d.changeset_id)}),mn=Math.min.apply(null,id),mx=Math.max.apply(null,id),p=(mx-mn)*0.1||10;
+  Highcharts.chart('chartID',{chart:{type:'areaspline',zoomType:'x'},xAxis:{type:'datetime',crosshair:true},yAxis:{title:{text:'ID'},min:mn-p,max:mx+p,startOnTick:false,endOnTick:false},legend:{enabled:false},plotOptions:{areaspline:{fillOpacity:.12,marker:{enabled:false}}},series:[{name:'Latest ID',data:pts(e,function(d){return Number(d.changeset_id)})}]});
 }
 function renderBar(){
   var s=S.monthly_leaderboard.slice().sort(function(a,b){return b[metric]-a[metric]}).slice(0,15);
